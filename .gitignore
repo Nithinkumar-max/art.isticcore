@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+
+# Environment & secrets
+.env
+.env.local
+.env*.local
+
+# Logs & OS junk
+*.log
+.DS_Store
+Thumbs.db
+
+# Tooling
+.tsbuildinfo
+*.tsbuildinfo
+.vercel
+.kombai/
+
+# Design scratch space (local only)
+pages UI/

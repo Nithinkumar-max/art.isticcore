@@ -1,0 +1,10 @@
+{
+  "name": "knotella-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix art.isticcore run dev",
+    "build": "npm --prefix art.isticcore run build",
+    "start": "npm --prefix art.isticcore run start"
+  }
+}

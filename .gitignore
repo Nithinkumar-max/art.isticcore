@@ -24,3 +24,18 @@ Thumbs.db
 
 # Design scratch space (local only)
 pages UI/
+
+# AI tooling files
+.agents/
+.opencode/
+opencode.json
+CLAUDE.md
+AGENTS.md
+
+# Project docs (local only)
+DESIGN_CLASSIFICATION.md
+PROJECT_MAP.md
+art.isticcore/AGENTS.md
+art.isticcore/CLAUDE.md
+art.isticcore/README.md
+art.isticcore/docs/

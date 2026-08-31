@@ -1,0 +1,246 @@
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --color-primary: #ac2a5d;
+  --color-primary-dark: #e63a73;
+  --color-primary-container: #ff6b9d;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #6e0035;
+  --color-primary-fixed: #ffd9e1;
+  --color-primary-fixed-dim: #ffb1c5;
+  --color-on-primary-fixed: #3f001b;
+  --color-secondary: #8c5000;
+  --color-secondary-container: #fe9400;
+  --color-on-secondary-container: #633700;
+  --color-surface: #fcf9f8;
+  --color-surface-bright: #fcf9f8;
+  --color-surface-dim: #dcd9d9;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f6f3f2;
+  --color-surface-container: #f0eded;
+  --color-surface-container-high: #eae7e7;
+  --color-surface-container-highest: #e5e2e1;
+  --color-surface-variant: #e5e2e1;
+  --color-on-surface: #1c1b1b;
+  --color-on-surface-variant: #574146;
+  --color-inverse-surface: #313030;
+  --color-inverse-on-surface: #f3f0ef;
+  --color-background: #fcf9f8;
+  --color-background-warm: #fff9f0;
+  --color-background-soft-pink: #fff0f5;
+  --color-border-muted: #d4d4d4;
+  --color-outline: #8a7176;
+  --color-outline-variant: #ddbfc5;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-tertiary: #006e18;
+  --color-tertiary-container: #42b446;
+  --color-admin-sidebar: #1f2937;
+  --color-admin-sidebar-deep: #172033;
+  --color-admin-canvas: #f9fafb;
+  --color-admin-border: #e5e7eb;
+  --font-serif: 'EB Garamond', Georgia, serif;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: var(--font-serif);
+  --font-body: var(--font-sans);
+  --spacing-gutter: 1.5rem;
+  --spacing-container-max: 80rem;
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.5rem;
+  --radius-xl: 2rem;
+  --radius-2xl: 2.5rem;
+  --radius-full: 9999px;
+  --shadow-pink-glow: 0 8px 24px -4px rgba(255, 107, 157, 0.4);
+  --shadow-soft: 0 10px 30px rgba(172, 42, 93, 0.06);
+  --shadow-admin: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+    font-synthesis: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-background-warm);
+    color: var(--color-on-surface);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background: var(--color-primary-fixed);
+    color: var(--color-on-primary-fixed, #3f001b);
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-dim);
+    border-radius: var(--radius-full);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-outline-variant);
+  }
+}
+
+@layer components {
+  .font-serif,
+  .font-heading {
+    font-family: var(--font-serif);
+  }
+
+  .font-sans {
+    font-family: var(--font-sans);
+  }
+
+  .label-caps {
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .pink-glow {
+    box-shadow: var(--shadow-pink-glow);
+  }
+
+  .soft-shadow {
+    box-shadow: var(--shadow-soft);
+  }
+
+  .admin-shadow {
+    box-shadow: var(--shadow-admin);
+  }
+
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .focus-ring:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-primary-container) 45%, transparent);
+    outline-offset: 3px;
+  }
+
+  .surface-card {
+    border: 1px solid color-mix(in srgb, var(--color-surface-dim) 48%, transparent);
+    border-radius: var(--radius-xl);
+    background: var(--color-surface-container-lowest);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .form-input {
+    display: block;
+    width: 100%;
+    border: 1px solid var(--color-surface-dim);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-container-low);
+    padding: 0.8rem 1rem;
+    color: var(--color-on-surface);
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  }
+
+  .form-input::placeholder {
+    color: color-mix(in srgb, var(--color-on-surface-variant) 60%, transparent);
+  }
+
+  .form-input:focus {
+    border-color: var(--color-primary-container);
+    background: var(--color-surface-container-lowest);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary-container) 18%, transparent);
+  }
+
+  /* Disable scroll-wheel increment/decrement on number inputs */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  .page-track {
+    width: min(100% - 3rem, var(--spacing-container-max));
+    margin-inline: auto;
+  }
+
+  .page-track-narrow {
+    width: min(100% - 3rem, 56rem);
+    margin-inline: auto;
+  }
+
+  @media (max-width: 639px) {
+    .page-track,
+    .page-track-narrow {
+      width: min(100% - 2rem, var(--spacing-container-max));
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

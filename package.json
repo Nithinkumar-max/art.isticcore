@@ -6,5 +6,9 @@
     "dev": "npm --prefix art.isticcore run dev",
     "build": "npm --prefix art.isticcore run build",
     "start": "npm --prefix art.isticcore run start"
+  },
+  "devDependencies": {
+    "@tailwindcss/language-server": "^0.16.0",
+    "typescript-language-server": "^6.0.0"
   }
 }

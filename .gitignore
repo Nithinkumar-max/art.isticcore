@@ -39,3 +39,14 @@ art.isticcore/AGENTS.md
 art.isticcore/CLAUDE.md
 art.isticcore/README.md
 art.isticcore/docs/
+
+# Unnecessary project files
+art.isticcore/lib/mock-data.ts
+art.isticcore/scripts/
+art.isticcore/public/file.svg
+art.isticcore/public/globe.svg
+art.isticcore/public/next.svg
+art.isticcore/public/vercel.svg
+art.isticcore/public/window.svg
+package.json
+package-lock.json

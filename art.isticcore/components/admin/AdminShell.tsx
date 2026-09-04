@@ -3,9 +3,10 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bell, ChevronRight, CircleHelp, LayoutDashboard, Menu, Package, PencilRuler, Settings, ShoppingBag, UserRound, Users, X } from 'lucide-react'
+import { Bell, ChevronRight, CircleHelp, LayoutDashboard, LogOut, Menu, Package, PencilRuler, Settings, ShoppingBag, UserRound, Users, X } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/authStore'
+import { SESSION_COOKIE_NAME } from '@/lib/session-ttl'
 
 function useNavBadges() {
   const [badges, setBadges] = useState<{ orders: number; customRequests: number }>({ orders: 0, customRequests: 0 })
@@ -22,14 +23,31 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
   const badges = useNavBadges()
-  const { user, isLoading } = useAuthStore()
+  const { user, isLoading, logout } = useAuthStore()
+
+  const isAdminLoginPage = pathname === '/admin/login'
 
   useEffect(() => {
+    if (isAdminLoginPage) return
     if (!isLoading && (!user || (user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN'))) {
-      router.replace('/login')
+      router.replace('/admin/login')
     }
-  }, [user, isLoading, router])
+  }, [user, isLoading, router, isAdminLoginPage])
+
+  const handleLogout = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {})
+      logout()
+      router.replace('/admin/login')
+      router.refresh()
+    } catch {
+      setSigningOut(false)
+    }
+  }
 
   const navItems = [
     { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
@@ -40,6 +58,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   ]
 
   const current = navItems.find((item) => item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href))
+
+  // The dedicated admin sign-in page is rendered WITHOUT the shell chrome —
+  // it must stay reachable whether or not a session exists.
+  if (isAdminLoginPage) {
+    return <>{children}</>
+  }
 
   if (isLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-admin-canvas"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-container border-t-transparent" /></div>
@@ -52,7 +76,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-admin-canvas text-on-surface">
       <aside className="fixed inset-y-0 left-0 z-50 hidden w-64 flex-col bg-admin-sidebar text-white shadow-2xl md:flex">
-        <AdminSidebar pathname={pathname} navItems={navItems} />
+        <AdminSidebar pathname={pathname} navItems={navItems} onLogout={handleLogout} signingOut={signingOut} />
       </aside>
       <AnimatePresence>
         {mobileOpen ? (
@@ -73,7 +97,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               transition={{ type: 'spring', stiffness: 320, damping: 32 }}
               className="relative flex h-full w-[min(82vw,18rem)] flex-col bg-admin-sidebar text-white shadow-2xl"
             >
-              <AdminSidebar pathname={pathname} navItems={navItems} onNavigate={() => setMobileOpen(false)} />
+              <AdminSidebar pathname={pathname} navItems={navItems} onNavigate={() => setMobileOpen(false)} onLogout={handleLogout} signingOut={signingOut} />
             </motion.aside>
           </div>
         ) : null}
@@ -112,6 +136,16 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-primary-fixed bg-primary-fixed text-primary">
               <UserRound className="h-4 w-4" />
             </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={signingOut}
+              className="focus-ring rounded-full p-2 text-on-surface-variant hover:bg-surface-container-low hover:text-error"
+              aria-label="Log out of the Studio"
+              title="Log out"
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
           </div>
         </header>
         <main>{children}</main>
@@ -122,7 +156,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; badge?: string }
 
-function AdminSidebar({ pathname, navItems, onNavigate }: { pathname: string; navItems: NavItem[]; onNavigate?: () => void }) {
+function AdminSidebar({ pathname, navItems, onNavigate, onLogout, signingOut }: { pathname: string; navItems: NavItem[]; onNavigate?: () => void; onLogout: () => void; signingOut: boolean }) {
   return (
     <>
       <div className="flex items-start justify-between px-6 pb-7 pt-8">
@@ -159,7 +193,15 @@ function AdminSidebar({ pathname, navItems, onNavigate }: { pathname: string; na
         <Link href="/admin/products/new" onClick={onNavigate} className="focus-ring flex min-h-12 items-center justify-center gap-2 rounded-full bg-primary-container px-4 text-sm font-semibold text-on-primary-container shadow-[0_8px_22px_rgba(255,107,157,0.25)] hover:bg-primary-dark hover:text-white">
           <Package className="h-4 w-4" />Add new product
         </Link>
-        <p className="flex items-center gap-2 px-4 pt-2 text-xs text-white/50"><UserRound className="h-4 w-4" />Signed in as admin</p>
+        <button
+          type="button"
+          onClick={onLogout}
+          disabled={signingOut}
+          className="focus-ring flex min-h-11 w-full items-center gap-3 rounded-full px-4 text-sm text-white/65 transition hover:bg-error hover:text-white disabled:opacity-60"
+        >
+          <LogOut className="h-5 w-5" />{signingOut ? 'Signing out...' : 'Log out'}
+        </button>
+        <p className="flex items-center gap-2 px-4 pt-2 text-xs text-white/50"><UserRound className="h-4 w-4" />Signed in as admin · 60-min auto sign-out</p>
       </div>
     </>
   )

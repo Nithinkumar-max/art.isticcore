@@ -8,11 +8,16 @@ export function CheckoutHeader() {
   const openCart = useCartStore((state) => state.openCart)
   return (
     <header className="fixed inset-x-0 top-0 z-40 border-b border-surface-container-high bg-surface/95 backdrop-blur-md">
-      <div className="page-track relative flex h-20 items-center justify-between gap-4">
-        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-on-surface-variant sm:text-sm"><LockKeyhole className="h-5 w-5 text-primary" />Secure checkout</div>
-        <Link href="/" className="absolute left-1/2 -translate-x-1/2 font-serif text-2xl font-semibold text-primary-dark sm:text-3xl">Art.isticcore</Link>
-        <button type="button" onClick={openCart} className="focus-ring rounded-full p-2 text-on-surface-variant hover:bg-background-soft-pink hover:text-primary md:hidden" aria-label="Open cart"><ShoppingBag className="h-5 w-5" /></button>
-        <span className="hidden text-sm text-on-surface-variant md:block">Need help? <a className="text-primary underline" href="mailto:hello@artisticcore.in">Contact us</a></span>
+      <div className="page-track grid h-20 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-on-surface-variant sm:text-sm">
+          <LockKeyhole className="h-5 w-5 shrink-0 text-primary" />
+          <span className="truncate">Secure checkout</span>
+        </div>
+        <Link href="/" className="shrink-0 px-1 font-serif text-2xl font-semibold text-primary-dark sm:text-3xl">Art.isticcore</Link>
+        <div className="flex min-w-0 items-center justify-end gap-2">
+          <button type="button" onClick={openCart} className="focus-ring shrink-0 rounded-full p-2 text-on-surface-variant hover:bg-background-soft-pink hover:text-primary md:hidden" aria-label="Open cart"><ShoppingBag className="h-5 w-5" /></button>
+          <span className="hidden text-sm text-on-surface-variant md:block truncate">Need help? <a className="text-primary underline" href="mailto:artisticcore@gmail.com">Contact us</a></span>
+        </div>
       </div>
     </header>
   )

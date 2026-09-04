@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { clientIp, consumeLoginCode, rateLimitIp } from '@/lib/otp'
+import { SESSION_COOKIE_NAME, sessionCookieOptions } from '@/lib/session-ttl'
 
 const bodySchema = z.object({
   email: z.string().email().max(254),
@@ -46,6 +47,10 @@ export async function POST(request: NextRequest) {
       console.error('POST /api/auth/otp/verify verifyOtp error:', error)
       return NextResponse.json({ error: 'Could not complete sign-in. Request a new code.' }, { status: 401 })
     }
+
+    // Stamp the absolute login-time cookie → proxy enforces 60-min expiry.
+    const cookieStore = await (await import('next/headers')).cookies()
+    cookieStore.set(SESSION_COOKIE_NAME, String(Date.now()), sessionCookieOptions())
 
     return NextResponse.json({ ok: true })
   } catch (error: unknown) {

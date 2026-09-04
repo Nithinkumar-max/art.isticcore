@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { createClient as createSupabaseJsClient } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
+import { SESSION_COOKIE_NAME, SESSION_TIMEOUT_MS, sessionCookieOptions } from '@/lib/session-ttl'
 
 let _adminClient: ReturnType<typeof createSupabaseJsClient> | null = null
 function createAdminClient() {
@@ -54,34 +55,34 @@ export async function proxy(request: NextRequest) {
 
     const pathname = request.nextUrl.pathname
 
-    // ── Session Timeout (1 hour) ─────────────────────────────────────────────
+    // ── Session Timeout (absolute 60 minutes since login) ────────────────────
+    // Supabase auto-refreshes access tokens (resetting `iat`), so JWT-iat checks
+    // never fire. Instead we stamp a login-time cookie (`art_session_start`) at
+    // every successful login and compare the wall-clock age. Sessions older than
+    // 60 minutes are signed out regardless of refresh activity.
     if (user) {
-      const authCookieEntry = [...request.cookies.getAll()].find(
-        (c) => c.name.endsWith('-auth-token') && c.name.startsWith('sb-'),
-      )
-      const sessionCookie = authCookieEntry?.value
-      if (sessionCookie) {
-        try {
-          const parts = sessionCookie.split('.')
-          if (parts.length >= 2) {
-            const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString())
-            const iat = payload.iat as number | undefined
-            if (iat) {
-              const sessionAgeSeconds = Math.floor(Date.now() / 1000) - iat
-              const ONE_HOUR = 3600
-              if (sessionAgeSeconds > ONE_HOUR) {
-                await supabase.auth.signOut()
-                const url = request.nextUrl.clone()
-                url.pathname = '/login'
-                url.searchParams.set('redirect', pathname)
-                url.searchParams.set('reason', 'session_expired')
-                return NextResponse.redirect(url)
-              }
-            }
-          }
-        } catch {
-          // If we can't parse the JWT, let it through
-        }
+      const raw = request.cookies.get(SESSION_COOKIE_NAME)?.value
+      const parsed = raw ? Number(raw) : NaN
+      let startMs = Number.isFinite(parsed) && parsed > 0 ? parsed : Date.now()
+      if (startMs > Date.now()) startMs = Date.now() // guard against absurd future values
+
+      const aged = Date.now() - startMs
+      if (aged > SESSION_TIMEOUT_MS) {
+        const url = request.nextUrl.clone()
+        url.pathname = pathname.startsWith('/admin') ? '/admin/login' : '/login'
+        url.searchParams.set('redirect', pathname)
+        url.searchParams.set('reason', 'session_expired')
+        await supabase.auth.signOut()
+        const response = NextResponse.redirect(url)
+        response.cookies.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), maxAge: 0 })
+        return response
+      }
+
+      // Absent stamp (pre-feature session or first request after deploy) → adopt
+      // this moment as the start so the absolute 60-minute window is enforced
+      // from here on out.
+      if (!raw || parsed !== startMs) {
+        supabaseResponse.cookies.set(SESSION_COOKIE_NAME, String(startMs), sessionCookieOptions())
       }
     }
 
@@ -94,10 +95,11 @@ export async function proxy(request: NextRequest) {
     }
 
     // ── Protect /admin/* routes ───────────────────────────────────────────────
-    if (pathname.startsWith('/admin')) {
+    const isAdminAuthPage = pathname === '/admin/login'
+    if (pathname.startsWith('/admin') && !isAdminAuthPage) {
       if (!user) {
         const url = request.nextUrl.clone()
-        url.pathname = '/login'
+        url.pathname = '/admin/login'
         url.searchParams.set('redirect', pathname)
         return NextResponse.redirect(url)
       }
@@ -113,13 +115,15 @@ export async function proxy(request: NextRequest) {
 
       const dbRole = profile?.role as string | undefined
       if (dbRole !== 'ADMIN' && dbRole !== 'SUPER_ADMIN') {
+        // Non-admin signed in → keep their session but send them to their home.
         const url = request.nextUrl.clone()
         url.pathname = '/'
         return NextResponse.redirect(url)
       }
     }
 
-    // ── Redirect logged-in users away from /login ──────────────────────────────
+    // Redirect logged-in users away from /login — leave the admin login page
+    // alone (a customer may legitimately view it to switch accounts).
     if (pathname === '/login' && user) {
       const redirect = request.nextUrl.searchParams.get('redirect') ?? '/'
       const url = request.nextUrl.clone()

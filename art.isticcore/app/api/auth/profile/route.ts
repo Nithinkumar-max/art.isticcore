@@ -1,19 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { SESSION_COOKIE_NAME, sessionCookieOptions } from '@/lib/session-ttl'
 
 /**
  * GET  → returns the signed-in user's DB profile (true role source).
  * POST → syncs the profile, auto-promotes ADMIN_EMAILS, and writes the
  *        DB role into user_metadata so the proxy can gate /admin without
  *        an extra DB query on every request.
+ *
+ * Both stamps the login-time cookie (`art_session_start`) once if missing so
+ * the proxy can enforce an absolute 60-minute session lifetime, and returns
+ * `sessionStart` so the client-side AuthProvider can mirror it.
  */
-async function resolveProfile(request: NextRequest) {
+async function resolveProfile(request: NextRequest, isPost: boolean) {
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (!user) return NextResponse.json({ profile: null }, { status: 401 })
+  if (!user) return NextResponse.json({ profile: null, sessionStart: null }, { status: 401 })
+
+  // Stamp login-time cookie — set it on POST (a fresh sign-in) or first sight.
+  const raw = request.cookies.get(SESSION_COOKIE_NAME)?.value
+  const parsed = raw ? Number(raw) : NaN
+  let startMs = Number.isFinite(parsed) && parsed > 0 ? parsed : Date.now()
+  if (isPost) startMs = Date.now()
+  const { cookies } = await import('next/headers')
+  const cookieStore = await cookies()
+  cookieStore.set(SESSION_COOKIE_NAME, String(startMs), sessionCookieOptions())
 
   const { data: profile } = await supabase
     .from('users')
@@ -76,12 +90,13 @@ async function resolveProfile(request: NextRequest) {
           role: current.role === 'ADMIN' || current.role === 'SUPER_ADMIN' ? current.role : 'CUSTOMER',
         }
       : null,
+    sessionStart: startMs,
   })
 }
 
 export async function GET(request: NextRequest) {
   try {
-    return await resolveProfile(request)
+    return await resolveProfile(request, false)
   } catch (error: unknown) {
     console.error('API /api/auth/profile GET error:', error)
     return NextResponse.json({ error: 'Failed to load profile' }, { status: 500 })
@@ -90,7 +105,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    return await resolveProfile(request)
+    return await resolveProfile(request, true)
   } catch (error: unknown) {
     console.error('API /api/auth/profile POST error:', error)
     return NextResponse.json({ error: 'Failed to sync profile' }, { status: 500 })

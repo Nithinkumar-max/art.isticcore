@@ -101,7 +101,12 @@ export const useCartStore = create<CartState>()(
         isOpen: false,
       }),
       version: 2,
-      migrate: () => ({ items: [] }),
+      // Never wipe a populated cart during a version bump — carry whatever
+      // items were persisted over (shape has been `{ items }` since v1).
+      migrate: (persistedState) => {
+        const current = (persistedState as { items?: CartItemClient[] } | undefined) ?? {}
+        return { items: Array.isArray(current.items) ? current.items : [] }
+      },
     }
   )
 )

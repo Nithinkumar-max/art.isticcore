@@ -3,11 +3,10 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Check, ChevronRight, Clock3, Download, Filter, Hand, Package, RefreshCw, Search, Truck, X } from 'lucide-react'
+import { Check, ChevronRight, Clock3, Download, FileText, Filter, Hand, Package, RefreshCw, Search, Truck, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatPrice } from '@/lib/utils'
 import { ORDER_STATUS_MAP } from '@/lib/utils'
-import { generatePackingSlip } from '@/lib/packing-slip'
 import { createClient } from '@/lib/supabase/client'
 import type { OrderStatus, OrderWithItems } from '@/types'
 
@@ -221,15 +220,16 @@ export function OrderBoardPage() {
     if (selected) return selected
     const raw = (data ?? []).find((o) => o.id === selectedId) as unknown as AdminOrderRow | undefined
     if (!raw) return null
+    const col = columnForStatus(raw.status as OrderStatus)
     return {
       id: raw.id,
       orderNumber: raw.order_number,
       status: raw.status as OrderStatus,
-      column: columnForStatus(raw.status as OrderStatus) as BoardColumn,
+      column: (col ?? 'accepted') as BoardColumn,
       productName: raw.items?.map((i) => i.name).join(' + ') || 'Custom request',
       customerName: raw.address?.full_name || raw.user?.name || 'Guest customer',
       price: Number(raw.total),
-      progress: 0,
+      progress: col ? (PROGRESS_BY_COLUMN[col] ?? 0) : 0,
       paymentLabel: `${raw.payment_method} · ${raw.payment_status}`,
       ageLabel: formatDistanceToNow(new Date(raw.created_at), { addSuffix: true }),
       raw,
@@ -282,6 +282,27 @@ export function OrderBoardPage() {
       flashNotice(`Could not cancel ${order.orderNumber}.`)
     } finally {
       void refetch()
+    }
+  }
+
+  const downloadDocument = async (orderId: string, type: 'invoice' | 'packing' | 'label' | 'all') => {
+    try {
+      const res = await fetch(`/api/admin/orders/${orderId}/documents?type=${type}`)
+      if (!res.ok) throw new Error('document fetch failed')
+      const blob = await res.blob()
+      const disposition = res.headers.get('Content-Disposition') ?? ''
+      const fileMatch = disposition.match(/filename="([^"]+)"/)
+      const filename = fileMatch?.[1] ?? `${type}-${orderId}.pdf`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      flashNotice('Could not generate the document. Try again.')
     }
   }
 
@@ -528,7 +549,7 @@ export function OrderBoardPage() {
 
               {/* Line items — dynamic from order_items join */}
               {(() => {
-                const items = (selectedOrderRaw.raw as unknown as AdminOrderRow).items ?? []
+                const items = (selectedOrderRaw?.raw as unknown as AdminOrderRow | undefined)?.items ?? []
                 if (!items.length) return null
                 return (
                   <div className="mt-6">
@@ -604,9 +625,20 @@ export function OrderBoardPage() {
               </div>
 
               <div className="mt-auto space-y-3">
-                <button type="button" onClick={() => { const raw = selectedOrderRaw?.raw as unknown as AdminOrderRow | undefined; if (raw) generatePackingSlip(raw) }} className="focus-ring flex min-h-11 w-full items-center justify-center gap-2 rounded-full border-2 border-outline-variant text-sm font-semibold text-on-surface-variant hover:border-primary hover:text-primary">
-                  <Download className="h-4 w-4" />Packing slip
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => void downloadDocument(selectedOrderRaw.id, 'invoice')} className="focus-ring flex min-h-11 items-center justify-center gap-2 rounded-full border border-primary/40 bg-background-soft-pink px-3 text-[13px] font-semibold text-primary hover:bg-primary-fixed/60">
+                    <FileText className="h-4 w-4" />Invoice
+                  </button>
+                  <button type="button" onClick={() => void downloadDocument(selectedOrderRaw.id, 'packing')} className="focus-ring flex min-h-11 items-center justify-center gap-2 rounded-full border border-primary/40 bg-background-soft-pink px-3 text-[13px] font-semibold text-primary hover:bg-primary-fixed/60">
+                    <Package className="h-4 w-4" />Packing slip
+                  </button>
+                  <button type="button" onClick={() => void downloadDocument(selectedOrderRaw.id, 'label')} className="focus-ring flex min-h-11 items-center justify-center gap-2 rounded-full border border-primary/40 bg-background-soft-pink px-3 text-[13px] font-semibold text-primary hover:bg-primary-fixed/60">
+                    <Truck className="h-4 w-4" />Shipping label
+                  </button>
+                  <button type="button" onClick={() => void downloadDocument(selectedOrderRaw.id, 'all')} className="focus-ring flex min-h-11 items-center justify-center gap-2 rounded-full bg-primary-container px-3 text-[13px] font-bold text-white pink-glow hover:bg-primary-dark">
+                    <Download className="h-4 w-4" />Print all
+                  </button>
+                </div>
                 <button type="button" onClick={() => setSelectedId(null)} className="focus-ring flex min-h-12 w-full items-center justify-center rounded-full bg-primary-container text-sm font-semibold text-white pink-glow hover:bg-primary-dark">
                   Done
                 </button>

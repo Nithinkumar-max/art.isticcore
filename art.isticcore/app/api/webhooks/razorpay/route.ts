@@ -22,32 +22,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 400 })
     }
 
-    const event = JSON.parse(rawBody)
+    let event: Record<string, unknown>
+    try {
+      event = JSON.parse(rawBody)
+    } catch {
+      return NextResponse.json({ status: 'ok' })
+    }
+
     const supabase = createAdminClient()
 
     if (event.event === 'payment.captured' || event.event === 'order.paid') {
-      const paymentEntity = event.payload?.payment?.entity
-      const razorpayOrderId = paymentEntity?.order_id
-      const razorpayPaymentId = paymentEntity?.id
+      const paymentEntity = (event.payload as Record<string, unknown>)?.payment as Record<string, unknown> | undefined
+      const entity = paymentEntity?.entity as Record<string, unknown> | undefined
+      const razorpayOrderId = entity?.order_id as string | undefined
+      const razorpayPaymentId = entity?.id as string | undefined
 
       if (razorpayOrderId) {
-        // Find payment record
         const { data: payment } = await supabase
           .from('payments')
-          .select('order_id')
+          .select('order_id, status')
           .eq('gateway_order_id', razorpayOrderId)
           .single()
 
         if (payment) {
+          if (payment.status === 'paid') {
+            return NextResponse.json({ status: 'ok' })
+          }
+
           await supabase
             .from('orders')
             .update({
-              status: 'accepted',
+              status: 'confirmed',
               payment_status: 'paid',
               updated_at: new Date().toISOString(),
             })
             .eq('id', payment.order_id)
-            .in('status', ['pending_review', 'accepted'])
+            .in('status', ['confirmed'])
 
           await supabase
             .from('payments')
@@ -59,8 +69,22 @@ export async function POST(request: NextRequest) {
             .eq('order_id', payment.order_id)
 
           const fullOrder = await getOrderById(payment.order_id)
-          if (fullOrder && fullOrder.address) {
-            const email = fullOrder.address.phone.includes('@') ? fullOrder.address.phone : ''
+          if (fullOrder?.address) {
+            const { data: orderUser } = await supabase
+              .from('orders')
+              .select('user_id')
+              .eq('id', payment.order_id)
+              .single()
+
+            let email = ''
+            if (orderUser?.user_id) {
+              const { data: userData } = await supabase.auth.admin.getUserById(orderUser.user_id)
+              email = userData?.user?.email ?? ''
+            }
+            if (!email && fullOrder.address.phone?.includes('@')) {
+              email = fullOrder.address.phone
+            }
+
             if (email) {
               await sendOrderConfirmationEmail({
                 order: fullOrder,
@@ -72,8 +96,9 @@ export async function POST(request: NextRequest) {
         }
       }
     } else if (event.event === 'payment.failed') {
-      const paymentEntity = event.payload?.payment?.entity
-      const razorpayOrderId = paymentEntity?.order_id
+      const paymentEntity = (event.payload as Record<string, unknown>)?.payment as Record<string, unknown> | undefined
+      const entity = paymentEntity?.entity as Record<string, unknown> | undefined
+      const razorpayOrderId = entity?.order_id as string | undefined
 
       if (razorpayOrderId) {
         await supabase
@@ -89,6 +114,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: 'ok' })
   } catch (error: unknown) {
     console.error('Razorpay webhook processing error:', error)
-    return NextResponse.json({ error: 'Webhook processing error' }, { status: 500 })
+    return NextResponse.json({ status: 'ok' })
   }
 }

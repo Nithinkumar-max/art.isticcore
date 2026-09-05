@@ -11,36 +11,29 @@ import { createClient } from '@/lib/supabase/client'
 import type { OrderStatus, OrderWithItems } from '@/types'
 
 // ─── Strict State Machine ───────────────────────────────────────────────
-// Orders start at accepted (confirmed) -> in_progress -> finishing -> quality_check -> ready_for_delivery -> delivered
-// cancelled / refunded are terminal off-board states
-// pending_review is kept for backwards compatibility but no longer shown as a column
-type BoardColumn = Exclude<OrderStatus, 'cancelled' | 'refunded' | 'pending_review'>
+// confirmed -> preparing -> ready_for_dispatch -> handed_over
+// Our responsibility ends at handover — final delivery is the courier's job.
+// cancelled / refunded are terminal off-board states.
+type BoardColumn = Exclude<OrderStatus, 'cancelled' | 'refunded'>
 
 const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  pending_review: ['accepted', 'cancelled'],
-  accepted: ['in_progress', 'cancelled'],
-  in_progress: ['finishing', 'cancelled'],
-  finishing: ['quality_check', 'cancelled'],
-  quality_check: ['ready_for_delivery', 'in_progress', 'cancelled'],
-  ready_for_delivery: ['delivered', 'cancelled'],
-  delivered: [],
+  confirmed: ['preparing', 'cancelled', 'refunded'],
+  preparing: ['ready_for_dispatch', 'cancelled', 'refunded'],
+  ready_for_dispatch: ['handed_over', 'cancelled', 'refunded'],
+  handed_over: ['refunded'],
   cancelled: [],
   refunded: [],
 }
 
 const columns: Array<{ id: BoardColumn; label: string; sublabel: string; tone: string; progress: number }> = [
-  { id: 'accepted', label: 'Confirmed', sublabel: 'accepted', tone: 'bg-[#eaf8ee] text-success', progress: 15 },
-  { id: 'in_progress', label: 'Working', sublabel: 'in_progress', tone: 'bg-[#fff5df] text-secondary', progress: 35 },
-  { id: 'finishing', label: 'Finishing', sublabel: 'finishing', tone: 'bg-background-soft-pink text-primary', progress: 55 },
-  { id: 'quality_check', label: 'Quality Check', sublabel: 'quality_check', tone: 'bg-[#eef5ff] text-[#427bd1]', progress: 75 },
-  { id: 'ready_for_delivery', label: 'Ready for Delivery', sublabel: 'ready_for_delivery', tone: 'bg-[#eef5ff] text-[#2a5db0]', progress: 90 },
-  { id: 'delivered', label: 'Delivered', sublabel: 'delivered', tone: 'bg-[#eaf8ee] text-success', progress: 100 },
+  { id: 'confirmed', label: 'Confirmed', sublabel: 'confirmed', tone: 'bg-[#eaf8ee] text-success', progress: 15 },
+  { id: 'preparing', label: 'Preparing', sublabel: 'preparing', tone: 'bg-[#fff5df] text-secondary', progress: 55 },
+  { id: 'ready_for_dispatch', label: 'Ready for Dispatch', sublabel: 'ready_for_dispatch', tone: 'bg-[#eef5ff] text-[#2a5db0]', progress: 85 },
+  { id: 'handed_over', label: 'Handed to Agent', sublabel: 'handed_over', tone: 'bg-[#eaf8ee] text-success', progress: 100 },
 ]
 
 function columnForStatus(status: OrderStatus): BoardColumn | null {
   if (status === 'cancelled' || status === 'refunded') return null
-  // Legacy pending_review orders show in the Confirmed column
-  if (status === 'pending_review') return 'accepted'
   return status as BoardColumn
 }
 
@@ -225,7 +218,7 @@ export function OrderBoardPage() {
       id: raw.id,
       orderNumber: raw.order_number,
       status: raw.status as OrderStatus,
-      column: (col ?? 'accepted') as BoardColumn,
+      column: (col ?? 'confirmed') as BoardColumn,
       productName: raw.items?.map((i) => i.name).join(' + ') || 'Custom request',
       customerName: raw.address?.full_name || raw.user?.name || 'Guest customer',
       price: Number(raw.total),
@@ -424,7 +417,7 @@ export function OrderBoardPage() {
             </div>
             <p className="mt-4 font-serif text-3xl font-semibold tracking-tight">No orders yet</p>
             <p className="mt-2 max-w-sm text-sm leading-relaxed text-on-surface-variant">
-              Orders land here the moment checkout completes. Pill badges will show <em className="font-serif">Confirmed → Working → Finishing → Quality Check → Ready for Delivery → Delivered</em>
+              Orders land here the moment checkout completes. Pill badges will show <em className="font-serif">Confirmed → Preparing → Ready for Dispatch → Handed to Delivery Agent</em>
             </p>
             <p className="mt-3 font-mono text-xs text-outline">orders · order_items · profiles — live, no mocks</p>
           </div>
@@ -570,7 +563,7 @@ export function OrderBoardPage() {
               <div className="mt-6 space-y-4">
                 <DetailRow icon={Clock3} label="Current stage" value={`${ORDER_STATUS_MAP[selectedOrderRaw.status]?.label ?? selectedOrderRaw.status} · ${selectedOrderRaw.ageLabel}`} />
                 <DetailRow icon={Hand} label="Payment" value={selectedOrderRaw.paymentLabel} />
-                <DetailRow icon={Truck} label="Courier" value={selectedOrderRaw.courier ?? 'Assign before shipping'} />
+                <DetailRow icon={Truck} label="Courier" value={selectedOrderRaw.courier ?? 'Assign before dispatch'} />
               </div>
 
               {selectedOrderRaw.note ? <p className="mt-6 rounded-xl bg-surface-container-low px-4 py-3 text-xs leading-relaxed text-on-surface-variant">Note: {selectedOrderRaw.note}</p> : null}
@@ -578,7 +571,7 @@ export function OrderBoardPage() {
               {/* State-machine stepper — only valid next transitions */}
               <div className="mt-8">
                 <h3 className="font-serif text-xl font-semibold">Move order</h3>
-                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">Only valid next states are shown. Invalid jumps (e.g. pending → delivered) are blocked by DB & API. Transitions auto-log to status_history.</p>
+                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">Only valid next states are shown. Invalid jumps (e.g. confirmed → handed_over) are blocked by DB & API. Transitions auto-log to status_history.</p>
                 <div className="mt-4 grid gap-2">
                   {(() => {
                     const valid = VALID_TRANSITIONS[selectedOrderRaw.status] ?? []
@@ -682,24 +675,13 @@ function OrderCard({ order, onOpen, onMove, onCancel }: { order: BoardOrder; onO
       </button>
       {!isTerminal && forward ? (
         <div className="mt-4 flex gap-2">
-          {order.status === 'pending_review' ? (
-            <>
-              <button type="button" onClick={() => onMove('accepted')} className="focus-ring flex-1 rounded-full bg-primary-container py-2 text-xs font-semibold tracking-wide text-white hover:bg-primary-dark">
-                Accept
-              </button>
-              <button type="button" onClick={onCancel} className="focus-ring flex-1 rounded-full border border-admin-border py-2 text-xs font-medium text-on-surface-variant hover:border-error hover:text-error">
-                Reject
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onMove(forward)}
-              className="focus-ring w-full rounded-full border border-primary-container bg-surface py-2 text-xs font-semibold text-primary hover:bg-background-soft-pink"
-            >
-              Move to {ORDER_STATUS_MAP[forward]?.label ?? forward}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => onMove(forward)}
+            className="focus-ring w-full rounded-full border border-primary-container bg-surface py-2 text-xs font-semibold text-primary hover:bg-background-soft-pink"
+          >
+            Move to {ORDER_STATUS_MAP[forward]?.label ?? forward}
+          </button>
         </div>
       ) : null}
     </article>

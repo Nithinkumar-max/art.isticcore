@@ -31,7 +31,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     fetch('/api/admin/stats')
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json() })
       .then(d => { setData(d); setLoading(false) })
       .catch(() => { setError('Could not load dashboard data'); setLoading(false) })
   }, [])
@@ -75,14 +75,12 @@ export function DashboardPage() {
 
   // Order distribution data
   const distributionColors: Record<string, string> = {
-    pending_review: 'bg-warning',
-    accepted: 'bg-primary-container',
-    in_progress: 'bg-secondary-container',
-    finishing: 'bg-primary-container',
-    quality_check: 'bg-[#d4a017]',
-    ready_for_delivery: 'bg-[#427bd1]',
-    delivered: 'bg-success',
+    confirmed: 'bg-warning',
+    preparing: 'bg-secondary-container',
+    ready_for_dispatch: 'bg-[#427bd1]',
+    handed_over: 'bg-success',
     cancelled: 'bg-outline',
+    refunded: 'bg-outline',
   }
   const totalOrders = Object.values(data.statusCounts).reduce((a, b) => a + b, 0) || 1
   const distribution = Object.entries(data.statusCounts)

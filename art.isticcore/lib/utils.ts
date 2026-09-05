@@ -90,13 +90,10 @@ export const ORDER_STATUS_MAP: Record<
   string,
   { label: string; color: string; bgColor: string; dot: string }
 > = {
-  pending_review: { label: 'Confirmed', color: 'text-[#385a00]', bgColor: 'bg-[#eaf8ee]', dot: 'bg-success' },
-  accepted: { label: 'Confirmed', color: 'text-[#385a00]', bgColor: 'bg-[#eaf8ee]', dot: 'bg-success' },
-  in_progress: { label: 'Working', color: 'text-[#385a00]', bgColor: 'bg-[#fff5df]', dot: 'bg-secondary-container' },
-  finishing: { label: 'Finishing', color: 'text-primary', bgColor: 'bg-background-soft-pink', dot: 'bg-primary-container' },
-  quality_check: { label: 'Quality Check', color: 'text-[#427bd1]', bgColor: 'bg-[#eef5ff]', dot: 'bg-[#427bd1]' },
-  ready_for_delivery: { label: 'Ready for Delivery', color: 'text-[#427bd1]', bgColor: 'bg-[#eef5ff]', dot: 'bg-[#427bd1]' },
-  delivered: { label: 'Delivered', color: 'text-white', bgColor: 'bg-success', dot: 'bg-success' },
+  confirmed: { label: 'Order Confirmed', color: 'text-[#385a00]', bgColor: 'bg-[#eaf8ee]', dot: 'bg-success' },
+  preparing: { label: 'Preparing Order', color: 'text-[#385a00]', bgColor: 'bg-[#fff5df]', dot: 'bg-secondary-container' },
+  ready_for_dispatch: { label: 'Ready for Dispatch', color: 'text-[#427bd1]', bgColor: 'bg-[#eef5ff]', dot: 'bg-[#427bd1]' },
+  handed_over: { label: 'Handed to Delivery Agent', color: 'text-white', bgColor: 'bg-success', dot: 'bg-success' },
   cancelled: { label: 'Cancelled', color: 'text-error', bgColor: 'bg-[#fff0f0]', dot: 'bg-error' },
   refunded: { label: 'Refunded', color: 'text-on-surface-variant', bgColor: 'bg-surface-container', dot: 'bg-outline' },
 }

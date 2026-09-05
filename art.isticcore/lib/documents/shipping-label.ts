@@ -2,7 +2,7 @@ import jsPDF from 'jspdf'
 import QRCode from 'qrcode'
 import type { OrderWithItems } from '@/types'
 import { registerNotoSans, useSans } from './font'
-import { PALETTE, paymentStatusLabel } from './shared'
+import { formatDate, orderTrackingUrl, PALETTE, paymentStatusLabel } from './shared'
 
 export const LABEL_WIDTH_MM = 101.6 // 4 inches
 export const LABEL_HEIGHT_MM = 152.4 // 6 inches
@@ -99,6 +99,13 @@ export async function renderShippingLabel(doc: jsPDF, order: OrderWithItems): Pr
   doc.setTextColor(255, 255, 255)
   doc.text(label, pageWidth - M - badgeW / 2, y, { align: 'center' })
 
+  // Handover badge — the parcel is now the courier's responsibility
+  if (order.status === 'handed_over') {
+    doc.setFillColor(16, 185, 129)
+    doc.roundedRect(pageWidth - M - badgeW, y - 5 + 8, badgeW, badgeH, 1.5, 1.5, 'F')
+    doc.text('HANDED OVER', pageWidth - M - badgeW / 2, y + 8, { align: 'center' })
+  }
+
   // ── Secondary order info ──────────────────────────────────────────────────
   useSans(doc, 'normal')
   doc.setFontSize(9)
@@ -109,6 +116,7 @@ export async function renderShippingLabel(doc: jsPDF, order: OrderWithItems): Pr
   ]
   if (order.courier_name) infoLines.push(['Courier', order.courier_name])
   if (order.tracking_number) infoLines.push(['Tracking', order.tracking_number])
+  if (order.shipped_date) infoLines.push(['Handed over', formatDate(order.shipped_date)])
   infoLines.forEach(([k, v]) => {
     useSans(doc, 'bold')
     doc.setFontSize(8)
@@ -141,11 +149,11 @@ export async function renderShippingLabel(doc: jsPDF, order: OrderWithItems): Pr
   doc.text(order.tracking_number ? 'TRACKING' : 'ORDER', qrStartX + qrSide / 2, qrBottom + qrSide + 3, { align: 'center' })
 
   // Order-status QR (secondary position — bottom right, below machine QR label zone)
-  const orderUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/orders/${order.id}`
+  const orderUrl = orderTrackingUrl(order.id)
   const statusQr = await QRCode.toDataURL(orderUrl, { width: 140, margin: 1 })
   const statusQrX = qrStartX + qrSide + qrGap
   doc.addImage(statusQr, 'PNG', statusQrX, qrBottom, qrSide, qrSide)
-  doc.text('STATUS', statusQrX + qrSide / 2, qrBottom + qrSide + 3, { align: 'center' })
+  doc.text('TRACK', statusQrX + qrSide / 2, qrBottom + qrSide + 3, { align: 'center' })
 
   // ── Footer strip ──────────────────────────────────────────────────────────
   doc.setDrawColor(...PALETTE.line)

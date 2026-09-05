@@ -7,7 +7,7 @@ export async function GET() {
   const ordersPending = await supabase
     .from('orders')
     .select('id', { count: 'exact', head: true })
-    .in('status', ['pending_review', 'accepted'])
+    .in('status', ['confirmed'])
 
   return NextResponse.json({
     orders: ordersPending.count ?? 0,

@@ -10,13 +10,10 @@ import { useAuthStore } from '@/store/authStore'
 import type { OrderWithItems, ProductWithRelations } from '@/types'
 
 const timeline: Array<[string, string, string]> = [
-  ['Order Received', 'We\'ve received your commission request — reviewing now.', 'pending_review'],
-  ['Accepted', 'Your commission is accepted — our artisans will begin soon.', 'accepted'],
-  ['In Progress', 'Our artisans are carefully crocheting your piece.', 'in_progress'],
-  ['Finishing', 'Stitching in the final details — almost done.', 'finishing'],
-  ['Quality Check', 'Inspecting every stitch for our quality standard.', 'quality_check'],
-  ['Ready for Delivery', 'Quality-checked and packed — awaiting courier pickup.', 'ready_for_delivery'],
-  ['Delivered', 'Delivered — enjoy your handmade piece!', 'delivered'],
+  ['Order Confirmed', 'Payment confirmed — we\'ve received your order.', 'confirmed'],
+  ['Preparing Order', 'Our artisans are handcrafting your piece with care.', 'preparing'],
+  ['Ready for Dispatch', 'Finished, packed, and ready to be handed over.', 'ready_for_dispatch'],
+  ['Handed to Delivery Agent', 'Parcel handed over — the courier has it now.', 'handed_over'],
 ]
 
 const IMAGE_PLACEHOLDER = '/images/product-placeholder.webp'
@@ -38,13 +35,10 @@ export interface TrackedOrderVM {
 
 function statusToStageIndex(status: string): number {
   const order: Record<string, number> = {
-    pending_review: 0,
-    accepted: 1,
-    in_progress: 2,
-    finishing: 3,
-    quality_check: 4,
-    ready_for_delivery: 5,
-    delivered: 6,
+    confirmed: 0,
+    preparing: 1,
+    ready_for_dispatch: 2,
+    handed_over: 3,
     cancelled: -1,
     refunded: -1,
   }
@@ -143,7 +137,7 @@ function TrackingResult({ order }: { order: TrackedOrderVM }) {
           </section>
           <section className="flex flex-col items-start justify-between gap-4 border border-outline-variant bg-background-soft-pink p-5 sm:flex-row sm:items-center sm:p-6">
             <div className="flex items-center gap-3"><Headphones className="h-6 w-6 text-primary-container" /><div><h3 className="text-sm font-medium">Need help with your order?</h3><p className="text-sm text-on-surface-variant">We&apos;re here to answer any questions.</p></div></div>
-            <a href="mailto:hello@artisticcore.in" className="focus-ring rounded-full border-2 border-primary-container px-5 py-2.5 text-sm font-semibold text-primary-container">Contact support</a>
+            <a href="mailto:artisticcore@gmail.com" className="focus-ring rounded-full border-2 border-primary-container px-5 py-2.5 text-sm font-semibold text-primary-container">Contact support</a>
           </section>
         </div>
         <aside className="h-fit overflow-hidden border border-background-soft-pink bg-surface-container-lowest">
@@ -278,6 +272,20 @@ export function ConfirmationPage({ orderId }: { orderId?: string }) {
   if (isLoading) return <LoadingSkeleton />
 
   if (!vm) {
+    if (orderId) {
+      return (
+        <main className="page-track flex flex-col items-center py-28 text-center">
+          <div className="flex h-24 w-24 items-center justify-center rounded-full bg-background-soft-pink text-primary-container pink-glow"><Package className="h-12 w-12" /></div>
+          <p className="label-caps mt-8 text-primary">Order not found</p>
+          <h1 className="mt-2 font-serif text-4xl font-semibold md:text-5xl">We couldn&apos;t find this order</h1>
+          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-on-surface-variant md:text-base">The order may still be processing. Check your orders page for updates.</p>
+          <div className="mt-10 flex w-full max-w-3xl flex-col gap-3 sm:flex-row sm:justify-center">
+            <Link href="/account/orders" className="focus-ring flex min-h-12 items-center justify-center gap-2 rounded-full bg-primary-container px-6 text-xs font-bold uppercase tracking-wider text-white pink-glow"><Truck className="h-4 w-4" />View my orders</Link>
+            <Link href="/shop" className="focus-ring flex min-h-12 items-center justify-center rounded-full border-2 border-primary px-6 text-xs font-bold uppercase tracking-wider text-primary">Continue shopping</Link>
+          </div>
+        </main>
+      )
+    }
     return (
       <main className="page-track flex flex-col items-center py-28 text-center">
         <div className="flex h-24 w-24 items-center justify-center rounded-full bg-background-soft-pink text-primary-container pink-glow"><Check className="h-12 w-12" /></div>
@@ -343,7 +351,7 @@ export function ConfirmationPage({ orderId }: { orderId?: string }) {
         <section className="surface-card p-6">
           <h2 className="font-serif text-3xl">Journey to you</h2>
           <div className="mt-5 space-y-4">
-            {timeline.slice(0, 3).map(([title, description], index) => (
+            {timeline.slice(0, 2).map(([title, description], index) => (
               <div key={title} className="flex items-start gap-3">
                 <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${index === 0 ? 'bg-primary-container text-white' : 'bg-surface-container-high text-outline'}`}>
                   {index === 0 ? <Check className="h-3.5 w-3.5" /> : <span className="h-2 w-2 rounded-full bg-white" />}

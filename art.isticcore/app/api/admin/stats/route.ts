@@ -17,10 +17,10 @@ export async function GET() {
   const [ordersAll, ordersToday, ordersPendingCOD, ordersShipped, itemsProcessing, recentOrders] = await Promise.all([
     supabase.from('orders').select('id, total, status, created_at'),
     supabase.from('orders').select('id').gte('created_at', todayStart),
-    supabase.from('orders').select('id, total').eq('status', 'pending_review').eq('payment_method', 'cod'),
-    supabase.from('orders').select('id').eq('status', 'delivered').gte('created_at', sevenDaysAgo),
+    supabase.from('orders').select('id, total').eq('status', 'confirmed').eq('payment_method', 'cod'),
+    supabase.from('orders').select('id').eq('status', 'handed_over').gte('created_at', sevenDaysAgo),
     supabase.from('order_items').select('id, quantity').in('order_id',
-      (await supabase.from('orders').select('id').in('status', ['accepted', 'in_progress'])).data?.map(o => o.id) ?? []
+      (await supabase.from('orders').select('id').in('status', ['confirmed', 'preparing'])).data?.map(o => o.id) ?? []
     ),
     supabase.from('orders').select('id, order_number, status, total, payment_method, created_at, address:addresses(full_name)').order('created_at', { ascending: false }).limit(10),
   ])

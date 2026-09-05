@@ -51,35 +51,19 @@ export async function POST(request: NextRequest) {
     //    returning success while the order stayed unpaid).
     const { createAdminClient } = await import('@/lib/supabase/server')
     const admin = createAdminClient()
-    // Support both new lowercase pipeline and legacy UPPERCASE enum during migration window
+    // Order is created with status 'confirmed'. Allow verification for any
+    // pre-payment status in the current enum (confirmed).
     let { data: updatedOrder, error: orderErr } = await admin
       .from('orders')
       .update({
-        status: 'accepted',
+        status: 'confirmed',
         payment_status: 'paid',
         updated_at: new Date().toISOString(),
       })
       .eq('id', payment.order_id)
-      .in('status', ['pending_review', 'PLACED', 'PAYMENT_PENDING', 'pending'])
+      .in('status', ['confirmed'])
       .select()
       .single()
-
-    // Fallback to legacy uppercase if DB hasn't been migrated yet (22P02)
-    if (orderErr && (orderErr as unknown as { code?: string }).code === '22P02') {
-      const retry = await admin
-        .from('orders')
-        .update({
-          status: 'accepted' as unknown as string,
-          payment_status: 'paid',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', payment.order_id)
-        .in('status', ['PLACED', 'PAYMENT_PENDING', 'pending_review', 'pending'])
-        .select()
-        .single()
-      updatedOrder = retry.data
-      orderErr = retry.error
-    }
 
     if (orderErr || !updatedOrder) {
       console.error('Failed to update order payment status:', orderErr)

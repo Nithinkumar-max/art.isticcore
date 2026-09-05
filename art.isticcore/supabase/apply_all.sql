@@ -2,7 +2,7 @@
 create extension if not exists "uuid-ossp";
 
 create type public.order_status as enum (
-  'pending', 'confirmed', 'processing', 'ready_to_ship', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'refunded'
+  'confirmed', 'preparing', 'ready_for_dispatch', 'handed_over', 'cancelled', 'refunded'
 );
 create type public.payment_method as enum ('RAZORPAY', 'COD');
 create type public.payment_status as enum (
@@ -166,7 +166,7 @@ create table public.orders (
   user_id uuid references public.users(id) on delete set null,
   address_id uuid references public.addresses(id) on delete set null,
   email text,
-  status public.order_status not null default 'pending',
+  status public.order_status not null default 'confirmed',
   payment_method public.payment_method not null,
   payment_status public.payment_status not null default 'PENDING',
   subtotal numeric(10,2) not null check (subtotal >= 0),
@@ -381,13 +381,10 @@ declare allowed text[];
 begin
   if old.status is distinct from new.status then
     case old.status::text
-      when 'pending' then allowed := array['confirmed','cancelled','refunded'];
-      when 'confirmed' then allowed := array['processing','cancelled','refunded'];
-      when 'processing' then allowed := array['ready_to_ship','cancelled','refunded'];
-      when 'ready_to_ship' then allowed := array['shipped','cancelled','refunded'];
-      when 'shipped' then allowed := array['out_for_delivery','cancelled'];
-      when 'out_for_delivery' then allowed := array['delivered','cancelled'];
-      when 'delivered' then allowed := array[]::text[];
+      when 'confirmed' then allowed := array['preparing','cancelled','refunded'];
+      when 'preparing' then allowed := array['ready_for_dispatch','cancelled','refunded'];
+      when 'ready_for_dispatch' then allowed := array['handed_over','cancelled','refunded'];
+      when 'handed_over' then allowed := array['refunded'];
       when 'cancelled' then allowed := array[]::text[];
       when 'refunded' then allowed := array[]::text[];
       else allowed := array[]::text[];
@@ -589,8 +586,8 @@ begin
   ) values (
     p_user_id, v_address_id,
     (select email from auth.users where id = p_user_id),
-    case when p_payment_method = 'COD' then 'PLACED'::public.order_status
-         else 'PAYMENT_PENDING'::public.order_status end,
+case when p_payment_method = 'COD' then 'confirmed'::public.order_status
+         else 'confirmed'::public.order_status end,
     p_payment_method,
     case when p_payment_method = 'COD' then 'COD_PENDING'::public.payment_status
          else 'PENDING'::public.payment_status end,

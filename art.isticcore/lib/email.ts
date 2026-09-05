@@ -6,7 +6,7 @@ export const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : (null as unknown as Resend)
 
-const FROM_EMAIL = process.env.EMAIL_FROM || 'Art.isticcore <orders@artisticcore.in>'
+const FROM_EMAIL = process.env.EMAIL_FROM || 'Art.isticcore <artisticcore@gmail.com>'
 
 /**
  * Send the self-generated login code (bypasses Supabase SMTP entirely).
@@ -150,7 +150,7 @@ export async function sendOrderConfirmationEmail({
           </div>
 
           <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e5e5; font-size: 12px; color: #737373; text-align: center;">
-            <p style="margin: 0;">Have questions about your order? Reply directly to this email or reach us on WhatsApp at +91 98765 43210.</p>
+            <p style="margin: 0;">Have questions about your order? Reply directly to this email or write to us at artisticcore@gmail.com.</p>
           </div>
         </div>
       </body>
@@ -192,7 +192,7 @@ export async function sendOrderShippingEmail({
       <body style="font-family: sans-serif; background-color: #fafafa; padding: 24px; color: #171717;">
         <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e5e5e5;">
           <h2 style="color: #991b1b;">Your Order is On Its Way! 📦</h2>
-          <p>Hi ${customerName}, your handcrafted piece from order <strong>#${order.order_number}</strong> has passed our quality check and is now shipped.</p>
+          <p>Hi ${customerName}, your handcrafted piece from order <strong>#${order.order_number}</strong> has been handed to our delivery agent and is now on its way to you.</p>
           ${
             order.tracking_number
               ? `<div style="background: #f4f4f5; padding: 16px; border-radius: 8px; margin: 20px 0;">

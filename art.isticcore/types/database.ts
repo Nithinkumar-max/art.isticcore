@@ -1,13 +1,10 @@
-// Artisan Creation Pipeline — strict state machine
-// pending_review -> accepted -> in_progress -> finishing -> quality_check -> ready_for_delivery -> delivered
+// Simplified order workflow
+// confirmed -> preparing -> ready_for_dispatch -> handed_over
 export type OrderStatus =
-  | 'pending_review'
-  | 'accepted'
-  | 'in_progress'
-  | 'finishing'
-  | 'quality_check'
-  | 'ready_for_delivery'
-  | 'delivered'
+  | 'confirmed'
+  | 'preparing'
+  | 'ready_for_dispatch'
+  | 'handed_over'
   | 'cancelled'
   | 'refunded';
 

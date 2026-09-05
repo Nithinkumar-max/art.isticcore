@@ -4,8 +4,7 @@
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
 
 export type OrderStatus =
-  | 'pending_review' | 'accepted' | 'in_progress' | 'finishing'
-  | 'quality_check' | 'ready_for_delivery' | 'delivered'
+  | 'confirmed' | 'preparing' | 'ready_for_dispatch' | 'handed_over'
   | 'cancelled' | 'refunded'
 
 export type PaymentMethod = 'razorpay' | 'cod'

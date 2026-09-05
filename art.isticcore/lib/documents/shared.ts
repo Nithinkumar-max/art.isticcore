@@ -42,6 +42,15 @@ export function statusLabel(status: string): string {
   return status.replace(/_/g, ' ').toUpperCase()
 }
 
+/** Absolute logged-in tracking URL for QR codes. Server-safe (no `window`). */
+export function orderTrackingUrl(orderId: string): string {
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').trim().replace(/\/+$/, '')
+  if (base && !/^https?:\/\/localhost(?::\d+)?$/i.test(base)) {
+    return `${base}/orders/${orderId}`
+  }
+  return `https://art.isticcore.in/orders/${orderId}`
+}
+
 export function paymentStatusLabel(status: string): string {
   switch (status) {
     case 'paid':

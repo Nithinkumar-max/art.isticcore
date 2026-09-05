@@ -141,7 +141,7 @@ export async function createOrder(params: CreateOrderParams): Promise<CreateOrde
 
   // 3. Create Order record
   const orderNumber = generateOrderNumber()
-  const initialStatus: OrderStatus = 'accepted'
+  const initialStatus: OrderStatus = 'confirmed'
   const initialPaymentStatus: PaymentStatus = 'pending'
 
   const { data: orderData, error: orderErr } = await admin
@@ -179,11 +179,15 @@ export async function createOrder(params: CreateOrderParams): Promise<CreateOrde
   const { error: itemsErr } = await admin.from('order_items').insert(itemsWithOrderId)
   if (itemsErr) {
     console.error('Order items insert error:', itemsErr)
+    await admin.from('orders').delete().eq('id', createdOrder.id)
+    throw new Error('Failed to save order items')
   }
 
   let razorpayOrderId: string | undefined
   if (paymentMethod === 'razorpay') {
     if (!razorpay) {
+      await admin.from('order_items').delete().eq('order_id', createdOrder.id)
+      await admin.from('orders').delete().eq('id', createdOrder.id)
       throw new Error('Payment gateway not configured')
     }
 
@@ -230,7 +234,13 @@ export async function getOrderById(orderId: string): Promise<OrderWithItems | nu
     .select(
       `
       *,
-      items:order_items(*),
+      items:order_items(
+        *,
+        product:products(
+          id, name,
+          images:product_images(url, alt_text, display_order, is_primary)
+        )
+      ),
       address:addresses(*),
       payment:payments(*)
     `
@@ -250,7 +260,13 @@ export async function getOrderByNumber(orderNumber: string): Promise<OrderWithIt
     .select(
       `
       *,
-      items:order_items(*),
+      items:order_items(
+        *,
+        product:products(
+          id, name,
+          images:product_images(url, alt_text, display_order, is_primary)
+        )
+      ),
       address:addresses(*),
       payment:payments(*)
     `
@@ -270,7 +286,13 @@ export async function getUserOrders(userId: string): Promise<OrderWithItems[]> {
     .select(
       `
       *,
-      items:order_items(*),
+      items:order_items(
+        *,
+        product:products(
+          id, name,
+          images:product_images(url, alt_text, display_order, is_primary)
+        )
+      ),
       address:addresses(*),
       payment:payments(*)
     `
@@ -310,11 +332,9 @@ export async function updateOrderStatus({
   if (courierName !== undefined) updatePayload.courier_name = courierName
   if (adminNote !== undefined) updatePayload.admin_note = adminNote
 
-  // Handle status timestamps
-  if (status.toLowerCase() === 'shipped') {
+  // Handle status timestamps: hand-over is when the parcel leaves us
+  if (status === 'handed_over') {
     updatePayload.shipped_date = new Date().toISOString()
-  } else if (status.toLowerCase() === 'delivered') {
-    updatePayload.delivered_date = new Date().toISOString()
   }
 
   const { data, error } = await supabase
@@ -324,7 +344,13 @@ export async function updateOrderStatus({
     .select(
       `
       *,
-      items:order_items(*),
+      items:order_items(
+        *,
+        product:products(
+          id, name,
+          images:product_images(url, alt_text, display_order, is_primary)
+        )
+      ),
       address:addresses(*),
       payment:payments(*)
     `,
@@ -335,10 +361,17 @@ export async function updateOrderStatus({
 
   const updatedOrder = data as unknown as OrderWithItems
 
-  // Send shipping notification email if shipped (case-insensitive for legacy DB)
-  if (status.toLowerCase() === 'shipped' && updatedOrder.address) {
-    const customerEmail = updatedOrder.address.phone || '' // or lookup user email
-    if (customerEmail.includes('@')) {
+  // Send shipping notification email once handed to the delivery agent
+  if (status === 'handed_over' && updatedOrder.address) {
+    let customerEmail = ''
+    if (updatedOrder.user_id) {
+      const { data: userData } = await supabase.auth.admin.getUserById(updatedOrder.user_id)
+      customerEmail = userData?.user?.email ?? ''
+    }
+    if (!customerEmail && updatedOrder.address.phone?.includes('@')) {
+      customerEmail = updatedOrder.address.phone
+    }
+    if (customerEmail) {
       await sendOrderShippingEmail({
         order: updatedOrder,
         customerEmail,

@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable'
 import QRCode from 'qrcode'
 import type { OrderWithItems } from '@/types'
 import { registerNotoSans, useSans } from './font'
-import { addressLines, formatDate, formatINR, isPaid, PALETTE, paymentStatusLabel, statusLabel } from './shared'
+import { addressLines, formatDate, formatINR, isPaid, orderTrackingUrl, PALETTE, paymentStatusLabel } from './shared'
 
 const M = 16 // page margin (mm)
 
@@ -38,7 +38,6 @@ export async function renderInvoice(doc: jsPDF, order: OrderWithItems): Promise<
   doc.setTextColor(...PALETTE.muted)
   doc.text(`Order #${order.order_number}`, pageWidth - M, y + 26, { align: 'right' })
   doc.text(`Date: ${formatDate(order.created_at)}`, pageWidth - M, y + 32, { align: 'right' })
-  doc.text(`Status: ${statusLabel(order.status)}`, pageWidth - M, y + 38, { align: 'right' })
 
   y = 46
   doc.setDrawColor(...PALETTE.line)
@@ -166,7 +165,7 @@ export async function renderInvoice(doc: jsPDF, order: OrderWithItems): Promise<
   doc.text(paymentText, M, totalsEnd + 4)
 
   // ── QR + footer ───────────────────────────────────────────────────────────
-  const orderUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/orders/${order.id}`
+  const orderUrl = orderTrackingUrl(order.id)
   const qrDataUrl = await QRCode.toDataURL(orderUrl, { width: 140, margin: 1 })
   const qrSize = 28
   const qrX = M

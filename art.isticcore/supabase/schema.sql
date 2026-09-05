@@ -141,7 +141,7 @@ CREATE TABLE public.cart_items (
 -- ============================================================
 -- Business logic pipeline: pending -> confirmed -> processing -> ready_to_ship -> shipped -> out_for_delivery -> delivered -> cancelled/refunded
 CREATE TYPE order_status AS ENUM (
-    'pending', 'confirmed', 'processing', 'ready_to_ship', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'refunded'
+    'confirmed', 'preparing', 'ready_for_dispatch', 'handed_over', 'cancelled', 'refunded'
 );
 
 CREATE TYPE payment_method AS ENUM ('ONLINE', 'COD', 'UPI', 'RAZORPAY');
@@ -156,7 +156,7 @@ CREATE TABLE public.orders (
     order_number TEXT UNIQUE,
     user_id UUID REFERENCES public.users(id),
     address_id UUID REFERENCES public.addresses(id),
-    status order_status DEFAULT 'pending',
+    status order_status DEFAULT 'confirmed',
     payment_method payment_method NOT NULL,
     payment_status payment_status DEFAULT 'PENDING',
     subtotal DECIMAL(10,2) NOT NULL,
@@ -400,15 +400,12 @@ DECLARE
 BEGIN
   IF OLD.status IS DISTINCT FROM NEW.status THEN
     CASE OLD.status::TEXT
-      WHEN 'pending' THEN allowed := ARRAY['confirmed','cancelled','refunded'];
-      WHEN 'confirmed' THEN allowed := ARRAY['processing','cancelled','refunded'];
-      WHEN 'processing' THEN allowed := ARRAY['ready_to_ship','cancelled','refunded'];
-      WHEN 'ready_to_ship' THEN allowed := ARRAY['shipped','cancelled','refunded'];
-      WHEN 'shipped' THEN allowed := ARRAY['out_for_delivery','cancelled'];
-      WHEN 'out_for_delivery' THEN allowed := ARRAY['delivered','cancelled'];
-      WHEN 'delivered' THEN allowed := ARRAY[]::TEXT[];
-      WHEN 'cancelled' THEN allowed := ARRAY[]::TEXT[];
-      WHEN 'refunded' THEN allowed := ARRAY[]::TEXT[];
+      WHEN 'confirmed'          THEN allowed := ARRAY['preparing','cancelled','refunded'];
+      WHEN 'preparing'          THEN allowed := ARRAY['ready_for_dispatch','cancelled','refunded'];
+      WHEN 'ready_for_dispatch' THEN allowed := ARRAY['handed_over','cancelled','refunded'];
+      WHEN 'handed_over'        THEN allowed := ARRAY['refunded'];
+      WHEN 'cancelled'          THEN allowed := ARRAY[]::TEXT[];
+      WHEN 'refunded'           THEN allowed := ARRAY[]::TEXT[];
       ELSE allowed := ARRAY[]::TEXT[];
     END CASE;
     IF NOT (NEW.status::TEXT = ANY(allowed)) THEN

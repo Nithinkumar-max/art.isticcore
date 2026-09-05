@@ -4,18 +4,15 @@ import { isAdmin } from '@/lib/auth'
 import { updateOrderStatus } from '@/lib/services/orders'
 
 const ORDER_STATUS_VALUES = [
-  'pending_review', 'accepted', 'in_progress', 'finishing', 'quality_check', 'ready_for_delivery', 'delivered', 'cancelled', 'refunded',
+  'confirmed', 'preparing', 'ready_for_dispatch', 'handed_over', 'cancelled', 'refunded',
 ] as const
 
 // Strict state-machine guard — prevents invalid jumps
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  pending_review: ['accepted', 'cancelled'],
-  accepted: ['in_progress', 'cancelled'],
-  in_progress: ['finishing', 'cancelled'],
-  finishing: ['quality_check', 'cancelled'],
-  quality_check: ['ready_for_delivery', 'in_progress', 'cancelled'],
-  ready_for_delivery: ['delivered', 'cancelled'],
-  delivered: [],
+  confirmed: ['preparing', 'cancelled', 'refunded'],
+  preparing: ['ready_for_dispatch', 'cancelled', 'refunded'],
+  ready_for_dispatch: ['handed_over', 'cancelled', 'refunded'],
+  handed_over: ['refunded'],
   cancelled: [],
   refunded: [],
 }

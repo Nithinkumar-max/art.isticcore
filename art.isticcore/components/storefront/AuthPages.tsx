@@ -61,6 +61,13 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
       .then((res) => res.json())
       .then((body) => {
         if (cancelled) return
+        // This browser's session was superseded by a login elsewhere (or has
+        // expired) — the server already signed it out. Bounce to a fresh login.
+        if (body?.sessionRevoked) {
+          useAuthStore.getState().logout()
+          window.location.href = '/login?reason=session_revoked'
+          return
+        }
         const profile = body?.profile as FinalProfile | null
         if (profile && profile.id === storedUser.id) {
           setCurrentUser(profile)
@@ -92,6 +99,14 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
     defaultValues: { name: '', phone: '' },
     mode: 'onBlur',
   })
+
+  /** End this browser's session so another account can sign in here. */
+  const switchAccount = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+    useAuthStore.getState().logout()
+    clearCart()
+    window.location.href = '/login'
+  }
 
   const routeAfterAuth = (role: 'CUSTOMER' | 'ADMIN' | 'SUPER_ADMIN') => {
     // Admins always land on the studio dashboard, whatever page they came from.
@@ -292,11 +307,12 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
           <div className="surface-card mb-6 flex flex-wrap items-center justify-between gap-3 p-4 text-left text-xs text-on-surface-variant" role="status">
             <span>
               Already signed in as <strong className="text-on-surface">{currentUser.email}</strong>
-              {currentUser.role !== 'CUSTOMER' ? ' · admin' : ''} — this browser holds one account at a time.
+              {currentUser.role !== 'CUSTOMER' ? ' · admin' : ''}. Your session stays active for one hour, and a new login on any device replaces this one.
             </span>
             <span className="flex gap-2">
               {currentUser.role !== 'CUSTOMER' ? <Link href="/admin" className="focus-ring rounded-full bg-primary-container px-3 py-1.5 font-semibold text-white hover:bg-primary-dark">Admin dashboard</Link> : null}
               <Link href="/account" className="focus-ring rounded-full border border-outline-variant px-3 py-1.5 font-semibold text-on-surface-variant hover:border-primary hover:text-primary">My account</Link>
+              <button type="button" onClick={switchAccount} className="focus-ring rounded-full border border-outline-variant px-3 py-1.5 font-semibold text-on-surface-variant hover:border-primary hover:text-primary">Use a different account</button>
             </span>
           </div>
         ) : null}

@@ -1,4 +1,6 @@
+import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
+import { isSessionValid, SESSION_TOKEN_COOKIE } from '@/lib/services/sessions'
 
 export interface SessionUser {
   id: string
@@ -18,6 +20,14 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   } = await supabase.auth.getUser()
 
   if (!user) return null
+
+  // Single-session gate: only the browser holding the account's current
+  // (unexpired) session token counts as signed in. Missing / revoked /
+  // superseded tokens behave as logged-out — the proxy completes the
+  // sign-out+redirect on the next request.
+  const cookieStore = await cookies()
+  const token = cookieStore.get(SESSION_TOKEN_COOKIE)?.value
+  if (!(await isSessionValid(user.id, token))) return null
 
   const { data: profile } = await supabase
     .from('users')

@@ -2,6 +2,11 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient as createSupabaseJsClient } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
 import { SESSION_COOKIE_NAME, SESSION_TIMEOUT_MS, sessionCookieOptions } from '@/lib/session-ttl'
+import {
+  SESSION_TOKEN_COOKIE,
+  isSessionValid,
+  sessionTokenCookieOptions,
+} from '@/lib/services/sessions'
 
 let _adminClient: ReturnType<typeof createSupabaseJsClient> | null = null
 function createAdminClient() {
@@ -14,6 +19,13 @@ function createAdminClient() {
     { auth: { persistSession: false, autoRefreshToken: false } },
   )
   return _adminClient
+}
+
+/** Carry sign-out cookies (cleared Supabase auth etc.) onto a redirect. */
+function copyClearedCookies(source: NextResponse, target: NextResponse) {
+  for (const cookie of source.cookies.getAll()) {
+    target.cookies.set(cookie)
+  }
 }
 
 export async function proxy(request: NextRequest) {
@@ -54,6 +66,30 @@ export async function proxy(request: NextRequest) {
     } = await supabase.auth.getUser()
 
     const pathname = request.nextUrl.pathname
+    const isAdminAuthPage = pathname === '/admin/login'
+
+    // ── Single-Session Token Enforcement ──────────────────────────────────
+    // Exactly one active session per account (public.user_sessions, 1-hour
+    // life, mirrored by an httpOnly cookie). A missing / expired / superseded
+    // token means this browser is no longer the active session — sign it out
+    // so logging in from another browser or device invalidates it.
+    if (user && !(await isSessionValid(user.id, request.cookies.get(SESSION_TOKEN_COOKIE)?.value))) {
+      const isProtected = pathname.startsWith('/account') || (pathname.startsWith('/admin') && !isAdminAuthPage)
+      await supabase.auth.signOut()
+      supabaseResponse.cookies.set(SESSION_TOKEN_COOKIE, '', { ...sessionTokenCookieOptions(), maxAge: 0 })
+      supabaseResponse.cookies.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), maxAge: 0 })
+
+      if (isProtected) {
+        const url = request.nextUrl.clone()
+        url.pathname = pathname.startsWith('/admin') ? '/admin/login' : '/login'
+        url.searchParams.set('redirect', pathname)
+        url.searchParams.set('reason', 'session_revoked')
+        const response = NextResponse.redirect(url)
+        copyClearedCookies(supabaseResponse, response)
+        return response
+      }
+      return supabaseResponse
+    }
 
     // ── Session Timeout (absolute 60 minutes since login) ────────────────────
     // Supabase auto-refreshes access tokens (resetting `iat`), so JWT-iat checks
@@ -75,6 +111,8 @@ export async function proxy(request: NextRequest) {
         await supabase.auth.signOut()
         const response = NextResponse.redirect(url)
         response.cookies.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), maxAge: 0 })
+        response.cookies.set(SESSION_TOKEN_COOKIE, '', { ...sessionTokenCookieOptions(), maxAge: 0 })
+        copyClearedCookies(supabaseResponse, response)
         return response
       }
 
@@ -95,7 +133,6 @@ export async function proxy(request: NextRequest) {
     }
 
     // ── Protect /admin/* routes ───────────────────────────────────────────────
-    const isAdminAuthPage = pathname === '/admin/login'
     if (pathname.startsWith('/admin') && !isAdminAuthPage) {
       if (!user) {
         const url = request.nextUrl.clone()

@@ -21,6 +21,16 @@ create table public.users (
   updated_at timestamptz not null default now()
 );
 
+create table public.user_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  session_token text not null unique,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+create index user_sessions_user_id_idx on public.user_sessions(user_id);
+create index user_sessions_expires_at_idx on public.user_sessions(expires_at);
+
 create table public.categories (
   id uuid primary key default uuid_generate_v4(),
   parent_id uuid references public.categories(id) on delete set null,

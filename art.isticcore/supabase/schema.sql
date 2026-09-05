@@ -92,6 +92,20 @@ CREATE TABLE public.users (
 );
 
 -- ============================================================
+-- USER SESSIONS (single active session per account)
+-- ============================================================
+CREATE TABLE public.user_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    session_token TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX user_sessions_user_id_idx ON public.user_sessions(user_id);
+CREATE INDEX user_sessions_expires_at_idx ON public.user_sessions(expires_at);
+
+-- ============================================================
 -- ADDRESSES
 -- ============================================================
 CREATE TABLE public.addresses (

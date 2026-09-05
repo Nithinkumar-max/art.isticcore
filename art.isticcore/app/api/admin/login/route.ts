@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from '@/lib/session-ttl'
+import {
+  SESSION_TOKEN_COOKIE,
+  establishSession,
+  sessionTokenCookieOptions,
+} from '@/lib/services/sessions'
 
 /**
  * POST /api/admin/login
@@ -50,9 +55,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Absolute 60-minute admin session — stamp login time for the proxy.
+    // Absolute 60-minute admin session — stamp login time for the proxy, and
+    // mint the single-session token (supersedes any earlier login anywhere).
     const cookieStore = await (await import('next/headers')).cookies()
     cookieStore.set(SESSION_COOKIE_NAME, String(Date.now()), sessionCookieOptions())
+    const token = await establishSession(user.id)
+    cookieStore.set(SESSION_TOKEN_COOKIE, token, sessionTokenCookieOptions())
 
     return NextResponse.json({ ok: true, redirect: '/admin' })
   } catch (error: unknown) {

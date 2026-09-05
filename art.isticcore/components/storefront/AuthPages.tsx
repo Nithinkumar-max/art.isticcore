@@ -1,7 +1,6 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm, type UseFormRegister, type FieldErrors } from 'react-hook-form'
 import { useEffect, useRef, useState } from 'react'
@@ -12,7 +11,7 @@ import { useCartStore } from '@/store/cartStore'
 import { useHydrated } from '@/lib/hooks/useHydrated'
 import { createClient } from '@/lib/supabase/client'
 
-type AuthStep = 'email' | 'otp' | 'profile'
+type AuthStep = 'email' | 'otp' | 'profile' | 'reset-request' | 'reset-code' | 'reset-done'
 
 type AuthMode = 'otp' | 'password'
 
@@ -44,7 +43,6 @@ async function finalizeSignIn(
 }
 
 export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
-  const router = useRouter()
   const isAdminRoute = redirect.startsWith('/admin')
   const storedUser = useAuthStore((state) => state.user)
   const hydrated = useHydrated()
@@ -52,22 +50,19 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
   const [step, setStep] = useState<AuthStep>('email')
   const [sessionVerified, setSessionVerified] = useState(false)
   const [currentUser, setCurrentUser] = useState<FinalProfile | null>(null)
+  // Set right before client-side navigation after a fresh sign-in, so the
+  // verification effect below doesn't repaint this page as "already signed
+  // in" while the redirect is in flight.
+  const justSignedInRef = useRef(false)
 
-  // Verify session is actually valid before showing "already signed in"
+  // Verify session is actually valid before showing "already signed in".
   useEffect(() => {
-    if (!hydrated || !storedUser) return
+    if (!hydrated || !storedUser || justSignedInRef.current) return
     let cancelled = false
     fetch('/api/auth/profile')
       .then((res) => res.json())
       .then((body) => {
         if (cancelled) return
-        // This browser's session was superseded by a login elsewhere (or has
-        // expired) — the server already signed it out. Bounce to a fresh login.
-        if (body?.sessionRevoked) {
-          useAuthStore.getState().logout()
-          window.location.href = '/login?reason=session_revoked'
-          return
-        }
         const profile = body?.profile as FinalProfile | null
         if (profile && profile.id === storedUser.id) {
           setCurrentUser(profile)
@@ -87,6 +82,10 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
   const [fullName, setFullName] = useState('')
   const [isSignUp, setIsSignUp] = useState(false)
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetOtp, setResetOtp] = useState(['', '', '', '', '', ''])  
+  const resetOtpRefs = useRef<Array<HTMLInputElement | null>>([])
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -109,16 +108,16 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
   }
 
   const routeAfterAuth = (role: 'CUSTOMER' | 'ADMIN' | 'SUPER_ADMIN') => {
-    // Admins always land on the studio dashboard, whatever page they came from.
+    // Hard full-page navigation (not client-side router.push): the freshly-set
+    // session cookies are sent on the new request, so the proxy middleware
+    // validates the session and serves the page exactly like a manual refresh —
+    // which is the direction that demonstrably works today. SPA navigation can
+    // race cookie propagation and strand the user on the login page.
     if (role !== 'CUSTOMER') {
-      router.push('/admin')
+      window.location.href = '/admin'
       return
     }
-    if (redirect && redirect !== '/account') {
-      router.push(redirect)
-    } else {
-      router.push('/account')
-    }
+    window.location.href = redirect && redirect !== '/account' ? redirect : '/account'
   }
 
   /** A fresh sign-in must never inherit a basket left in localStorage. */
@@ -155,18 +154,19 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
           return
         }
       }
-      const supabase = createClient()
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
+      // Server-side sign-in — sets the session cookies on this response so the
+      // browser is reliably signed in (same mechanism as OTP verify / admin).
+      const loginRes = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password }),
       })
-      if (signInError) {
+      const loginBody = await loginRes.json().catch(() => null)
+      if (!loginRes.ok) {
         setError(
           wantsSignUp
             ? 'Account created! Signing you in failed — please try signing in.'
-            : signInError.message === 'Invalid login credentials'
-              ? 'Wrong email or password. Please try again.'
-              : signInError.message,
+            : (loginBody?.error as string) || 'Wrong email or password. Please try again.',
         )
         return
       }
@@ -178,6 +178,7 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
         setStep('profile')
         return
       }
+      justSignedInRef.current = true
       routeAfterAuth(profile?.role ?? 'CUSTOMER')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not sign you in. Try again.')
@@ -236,6 +237,7 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
       setMessage('')
       if (!profile) throw new Error('Session could not be established.')
       if (profile.name) {
+        justSignedInRef.current = true
         routeAfterAuth(profile.role)
         return
       }
@@ -268,6 +270,90 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
     }
   }
 
+  /** Step 1 of forgot password: send the reset code to the email. */
+  const requestPasswordReset = async () => {
+    const cleanEmail = resetEmail.trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setError('Enter a valid email address.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const res = await fetch('/api/auth/forgot/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(body?.error || 'Could not send the code. Try again.')
+      setResetEmail(cleanEmail)
+      setMessage(`A reset code is on its way to ${body?.maskedEmail || cleanEmail}. Check your inbox and spam folder.`)
+      setStep('reset-code')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not send the code. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Step 2 of forgot password: verify the code and set a new password. */
+  const submitPasswordReset = async () => {
+    const code = resetOtp.join('')
+    if (code.length !== 6) {
+      setError('Enter all 6 digits to continue.')
+      return
+    }
+    if (resetPassword.length < 8) {
+      setError('Password needs at least 8 characters.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const res = await fetch('/api/auth/forgot/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail, code, password: resetPassword }),
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(body?.error || 'Could not reset your password. Try again.')
+      setMessage('')
+      setStep('reset-done')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not reset your password. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const updateResetOtp = (index: number, value: string) => {
+    const digit = value.replace(/\D/g, '').slice(-1)
+    setResetOtp((current) => current.map((item, itemIndex) => itemIndex === index ? digit : item))
+    if (digit && index < 5) resetOtpRefs.current[index + 1]?.focus()
+  }
+
+  const resendResetOtp = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const res = await fetch('/api/auth/forgot/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail }),
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(body?.error || 'Could not resend. Try again.')
+      setMessage('A fresh code is on its way.')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not resend. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const updateOtp = (index: number, value: string) => {
     const digit = value.replace(/\D/g, '').slice(-1)
     setOtp((current) => current.map((item, itemIndex) => itemIndex === index ? digit : item))
@@ -289,6 +375,7 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
         .eq('id', pendingUserId)
       if (updateError) throw updateError
       const profile = await finalizeSignIn(setUser)
+      justSignedInRef.current = true
       routeAfterAuth(profile?.role ?? 'CUSTOMER')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not save your profile.')
@@ -307,7 +394,7 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
           <div className="surface-card mb-6 flex flex-wrap items-center justify-between gap-3 p-4 text-left text-xs text-on-surface-variant" role="status">
             <span>
               Already signed in as <strong className="text-on-surface">{currentUser.email}</strong>
-              {currentUser.role !== 'CUSTOMER' ? ' · admin' : ''}. Your session stays active for one hour, and a new login on any device replaces this one.
+              {currentUser.role !== 'CUSTOMER' ? ' · admin' : ''}. You can sign in on as many browsers as you like.
             </span>
             <span className="flex gap-2">
               {currentUser.role !== 'CUSTOMER' ? <Link href="/admin" className="focus-ring rounded-full bg-primary-container px-3 py-1.5 font-semibold text-white hover:bg-primary-dark">Admin dashboard</Link> : null}
@@ -318,13 +405,16 @@ export function AuthPages({ redirect = '/account' }: { redirect?: string }) {
         ) : null}
         {step === 'email' ? (
           mode === 'password' || isAdminRoute ? (
-            <PasswordStep email={email} setEmail={setEmail} password={password} setPassword={setPassword} fullName={fullName} setFullName={setFullName} isSignUp={isSignUp && !isAdminRoute} setIsSignUp={setIsSignUp} onSubmit={signInWithPassword} busy={busy} error={error} onSwitchMode={() => { setMode('otp'); setError(''); setMessage('') }} isAdminRoute={isAdminRoute} />
+            <PasswordStep email={email} setEmail={setEmail} password={password} setPassword={setPassword} fullName={fullName} setFullName={setFullName} isSignUp={isSignUp && !isAdminRoute} setIsSignUp={setIsSignUp} onSubmit={signInWithPassword} busy={busy} error={error} onSwitchMode={() => { setMode('otp'); setError(''); setMessage('') }} onForgotPassword={() => { setStep('reset-request'); setError(''); setMessage('') }} isAdminRoute={isAdminRoute} />
           ) : (
             <EmailStep email={email} setEmail={setEmail} onSubmit={sendOtp} busy={busy} message={message} error={error} onSwitchMode={() => { setMode('password'); setError(''); setMessage('') }} />
           )
         ) : null}
         {step === 'otp' && !isAdminRoute ? <OtpStep email={email} otp={otp} busy={busy} onChange={updateOtp} refs={otpRefs} onSubmit={verifyOtp} onEdit={() => { setStep('email'); setMessage(''); setError('') }} onResend={resendOtp} message={message} error={error} /> : null}
         {step === 'profile' ? <ProfileStep register={register} errors={errors} busy={busy} onSubmit={handleSubmit(submitProfile)} error={error} /> : null}
+        {step === 'reset-request' ? <ResetRequestStep email={resetEmail} setEmail={setResetEmail} onSubmit={requestPasswordReset} busy={busy} message={message} error={error} onBack={() => { setStep('email'); setMode('password'); setError(''); setMessage('') }} /> : null}
+        {step === 'reset-code' ? <ResetCodeStep email={resetEmail} otp={resetOtp} password={resetPassword} setPassword={setResetPassword} busy={busy} onChange={updateResetOtp} refs={resetOtpRefs} onSubmit={submitPasswordReset} onEdit={() => { setStep('reset-request'); setMessage(''); setError('') }} onResend={resendResetOtp} message={message} error={error} /> : null}
+        {step === 'reset-done' ? <ResetDoneStep email={resetEmail} onBack={() => { setStep('email'); setMode('password'); setEmail(resetEmail); setPassword(''); setError(''); setMessage('') }} /> : null}
       </div>
     </main>
   )
@@ -343,6 +433,7 @@ function PasswordStep({
   busy,
   error,
   onSwitchMode,
+  onForgotPassword,
   isAdminRoute,
 }: {
   email: string
@@ -357,6 +448,7 @@ function PasswordStep({
   busy: boolean
   error: string
   onSwitchMode: () => void
+  onForgotPassword: () => void
   isAdminRoute: boolean
 }) {
   return (
@@ -374,6 +466,11 @@ function PasswordStep({
         <button type="submit" disabled={busy} suppressHydrationWarning className="focus-ring flex min-h-14 w-full items-center justify-center rounded-full bg-primary-container text-sm font-semibold text-white pink-glow hover:bg-primary-dark disabled:opacity-60">{busy ? (isSignUp ? 'Creating account...' : 'Signing in...') : isSignUp ? 'Create account & sign in' : 'Sign in'}</button>
       </form>
       {error ? <p role="alert" className="mt-4 rounded-xl bg-[#fff0f0] px-4 py-3 text-xs text-error">{error}</p> : null}
+      {!isAdminRoute && !isSignUp ? (
+        <p className="mt-4 text-center text-xs text-on-surface-variant">
+          <button type="button" onClick={onForgotPassword} className="font-semibold text-primary underline">Forgot password?</button>
+        </p>
+      ) : null}
       {!isAdminRoute ? (
         <>
           <p className="mt-6 text-center text-xs text-on-surface-variant">
@@ -423,6 +520,63 @@ function OtpStep({ email, otp, busy, onChange, refs, onSubmit, onEdit, onResend,
       {message ? <p role="status" className="mt-4 rounded-xl bg-background-soft-pink px-4 py-3 text-xs text-primary">{message}</p> : null}
       {error ? <p role="alert" className="mt-4 rounded-xl bg-[#fff0f0] px-4 py-3 text-xs text-error">{error}</p> : null}
       <p className="mt-6 text-xs text-on-surface-variant">Didn&apos;t receive the code? <button type="button" onClick={onResend} disabled={busy} className="font-semibold text-primary underline disabled:opacity-60">Resend code</button></p>
+    </section>
+  )
+}
+
+function ResetRequestStep({ email, setEmail, onSubmit, busy, message, error, onBack }: { email: string; setEmail: (v: string) => void; onSubmit: () => void; busy: boolean; message: string; error: string; onBack: () => void }) {
+  return (
+    <section className="text-center">
+      <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full border-2 border-primary-fixed bg-surface soft-shadow"><LockKeyhole className="h-10 w-10 text-primary" /></div>
+      <p className="label-caps mt-8 text-primary">Reset password</p>
+      <h1 className="mt-2 font-serif text-4xl font-semibold">Forgot your password?</h1>
+      <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">Enter your email and we&apos;ll send you a 6-digit reset code.</p>
+      <form onSubmit={(event) => { event.preventDefault(); onSubmit() }} className="mt-8 space-y-4 text-left">
+        <label className="block"><span className="label-caps text-on-surface-variant">Email address</span><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" placeholder="you@example.com" suppressHydrationWarning className="focus-ring mt-2 min-h-12 w-full rounded-full border border-outline-variant bg-surface px-5 text-sm outline-none placeholder:text-outline focus-within:border-primary-container" /></label>
+        <button type="submit" disabled={busy} suppressHydrationWarning className="focus-ring flex min-h-14 w-full items-center justify-center rounded-full bg-primary-container text-sm font-semibold text-white pink-glow hover:bg-primary-dark disabled:opacity-60">{busy ? 'Sending code...' : 'Send reset code'}</button>
+      </form>
+      {message ? <p role="status" className="mt-4 rounded-xl bg-surface px-4 py-3 text-xs text-primary">{message}</p> : null}
+      {error ? <p role="alert" className="mt-4 rounded-xl bg-[#fff0f0] px-4 py-3 text-xs text-error">{error}</p> : null}
+      <p className="mt-6 text-center text-xs text-on-surface-variant">
+        Remember it now? <button type="button" onClick={onBack} className="font-semibold text-primary underline">Back to sign in</button>
+      </p>
+    </section>
+  )
+}
+
+function ResetCodeStep({ email, otp, password, setPassword, busy, onChange, refs, onSubmit, onEdit, onResend, message, error }: { email: string; otp: string[]; password: string; setPassword: (v: string) => void; busy: boolean; onChange: (i: number, v: string) => void; refs: React.MutableRefObject<Array<HTMLInputElement | null>>; onSubmit: () => void; onEdit: () => void; onResend: () => void; message: string; error: string }) {
+  return (
+    <section className="surface-card p-6 text-center sm:p-8">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-background-soft-pink text-primary"><LockKeyhole className="h-6 w-6" /></div>
+      <p className="label-caps mt-5 text-primary">Check your inbox</p>
+      <h1 className="mt-2 font-serif text-4xl font-semibold">Reset code</h1>
+      <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">We sent a 6-digit code to<br /><strong className="text-on-surface">{email}</strong> <button type="button" onClick={onEdit} className="text-primary underline">Edit</button></p>
+      <div className="mt-7 flex justify-between gap-2">
+        {otp.map((value, index) => (
+          <input key={index} ref={(element) => { refs.current[index] = element }} value={value} onChange={(event) => onChange(index, event.target.value)} onKeyDown={(event) => { if (event.key === 'Backspace' && !otp[index] && index > 0) refs.current[index - 1]?.focus() }} inputMode="numeric" maxLength={1} aria-label={`Code digit ${index + 1}`} suppressHydrationWarning className="focus-ring h-12 min-w-0 flex-1 rounded-xl border border-surface-dim bg-surface-container-low text-center font-serif text-2xl" />
+        ))}
+      </div>
+      <label className="mt-6 block text-left"><span className="label-caps text-on-surface-variant">New password</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" placeholder="At least 8 characters" suppressHydrationWarning className="focus-ring mt-2 min-h-12 w-full rounded-full border border-outline-variant bg-surface px-5 text-sm outline-none placeholder:text-outline focus-within:border-primary-container" /></label>
+      <button type="button" onClick={onSubmit} disabled={busy} suppressHydrationWarning className="focus-ring mt-6 flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-primary-container text-sm font-semibold text-white pink-glow hover:bg-primary-dark disabled:opacity-60">{busy ? 'Resetting...' : 'Reset password'} {!busy ? <ArrowRight className="h-4 w-4" /> : null}</button>
+      {message ? <p role="status" className="mt-4 rounded-xl bg-background-soft-pink px-4 py-3 text-xs text-primary">{message}</p> : null}
+      {error ? <p role="alert" className="mt-4 rounded-xl bg-[#fff0f0] px-4 py-3 text-xs text-error">{error}</p> : null}
+      <p className="mt-6 text-xs text-on-surface-variant">Didn&apos;t receive the code? <button type="button" onClick={onResend} disabled={busy} className="font-semibold text-primary underline disabled:opacity-60">Resend code</button></p>
+    </section>
+  )
+}
+
+function ResetDoneStep({ email, onBack }: { email: string; onBack: () => void }) {
+  return (
+    <section className="text-center">
+      <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full border-2 border-primary-fixed bg-surface soft-shadow"><Check className="h-10 w-10 text-primary" /></div>
+      <p className="label-caps mt-8 text-primary">Password reset</p>
+      <h1 className="mt-2 font-serif text-4xl font-semibold">You&apos;re all set</h1>
+      <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">
+        Your password has been reset. You can now sign in with your new password.
+      </p>
+      <button type="button" onClick={onBack} className="focus-ring mt-8 inline-flex min-h-14 items-center justify-center rounded-full bg-primary-container px-8 text-sm font-semibold text-white pink-glow hover:bg-primary-dark">
+        Sign in to {email}
+      </button>
     </section>
   )
 }

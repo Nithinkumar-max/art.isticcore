@@ -38,6 +38,14 @@ function cooldownKey(email: string): string {
   return `auth:otp-cooldown:${email.toLowerCase()}`
 }
 
+function resetKey(email: string): string {
+  return `auth:reset:${email.toLowerCase()}`
+}
+
+function resetCooldownKey(email: string): string {
+  return `auth:reset-cooldown:${email.toLowerCase()}`
+}
+
 function hashCode(email: string, code: string): string {
   return createHash('sha256').update(`${email.toLowerCase()}:${code}`).digest('hex')
 }
@@ -156,6 +164,54 @@ export async function consumeLoginCode(email: string, code: string): Promise<Con
 
   await deleteRecord(key)
   return { status: 'ok', tokenHash: record.tokenHash }
+}
+
+/**
+ * True when a reset code was sent for this email recently (resend throttle).
+ */
+export async function isResetThrottled(email: string): Promise<boolean> {
+  return Boolean(await getRecord(resetCooldownKey(email)))
+}
+
+/**
+ * Generates and stores a 6-digit password-reset code, returning the plain
+ * code for delivery. Unlike login codes there is no Supabase token to stash —
+ * verification directly drives admin password update.
+ */
+export async function issueResetCode(email: string): Promise<string> {
+  const code = generateCode()
+  await setRecord(resetKey(email), { codeHash: hashCode(email, code), tokenHash: '', attempts: 0 }, OTP_TTL_SECONDS)
+  await setRecord(resetCooldownKey(email), { codeHash: '', tokenHash: '', attempts: 0 }, RESEND_COOLDOWN_SECONDS)
+  return code
+}
+
+export type ResetCodeResult = 'ok' | 'invalid' | 'expired' | 'locked'
+
+/**
+ * Checks a user-submitted reset code (single-use, TTL + attempt lockout).
+ * The consumed flag lets callers burn the record after a successful reset.
+ */
+export async function verifyResetCode(email: string, code: string): Promise<ResetCodeResult> {
+  const key = resetKey(email)
+  const record = await getRecord(key)
+  if (!record) return 'expired'
+
+  const submitted = Buffer.from(hashCode(email, code))
+  const stored = Buffer.from(record.codeHash)
+  const matches = submitted.length === stored.length && timingSafeEqual(submitted, stored)
+
+  if (!matches) {
+    const attempts = record.attempts + 1
+    if (attempts >= MAX_VERIFY_ATTEMPTS) {
+      await deleteRecord(key)
+      return 'locked'
+    }
+    await setRecord(key, { ...record, attempts }, OTP_TTL_SECONDS)
+    return 'invalid'
+  }
+
+  await deleteRecord(key)
+  return 'ok'
 }
 
 /**

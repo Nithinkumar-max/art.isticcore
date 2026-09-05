@@ -1,23 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from '@/lib/session-ttl'
-import {
-  SESSION_TOKEN_COOKIE,
-  establishSession,
-  isSessionValid,
-  pruneExpiredSessions,
-  sessionTokenCookieOptions,
-} from '@/lib/services/sessions'
 
 /**
  * GET  → returns the signed-in user's DB profile (true role source).
- * POST → syncs the profile, auto-promotes ADMIN_EMAILS, establishes the
- *        single-session token, and writes the DB role into user_metadata so
- *        the proxy can gate /admin without an extra DB query on every request.
- *
- * Both stamps the login-time cookie (`art_session_start`) once if missing so
- * the proxy can enforce an absolute 60-minute session lifetime, and returns
- * `sessionStart` so the client-side AuthProvider can mirror it.
+ * POST → syncs the profile, auto-promotes ADMIN_EMAILS, and stamps the
+ *        login-time cookie so the proxy can enforce an absolute 60-minute
+ *        session lifetime. Also returns `sessionStart` so the client-side
+ *        AuthProvider can mirror it.
  */
 async function resolveProfile(request: NextRequest, isPost: boolean) {
   const supabase = await createClient()
@@ -29,24 +19,6 @@ async function resolveProfile(request: NextRequest, isPost: boolean) {
 
   const { cookies } = await import('next/headers')
   const cookieStore = await cookies()
-
-  // ── Single-session token enforcement ────────────────────────────────────
-  // Exactly one active session per account. A browser whose token is missing,
-  // expired, or superseded by a newer login is signed out here so a login on
-  // any other device invalidates this one.
-  if (!isPost && !(await isSessionValid(user.id, request.cookies.get(SESSION_TOKEN_COOKIE)?.value))) {
-    await supabase.auth.signOut()
-    cookieStore.set(SESSION_TOKEN_COOKIE, '', { ...sessionTokenCookieOptions(), maxAge: 0 })
-    cookieStore.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), maxAge: 0 })
-    await pruneExpiredSessions()
-    return NextResponse.json({ profile: null, sessionStart: null, sessionRevoked: true })
-  }
-
-  // Fresh sign-in (POST) → mint a new session, replacing any older one.
-  if (isPost) {
-    const freshToken = await establishSession(user.id)
-    cookieStore.set(SESSION_TOKEN_COOKIE, freshToken, sessionTokenCookieOptions())
-  }
 
   // Stamp login-time cookie — set it on POST (a fresh sign-in) or first sight.
   const raw = request.cookies.get(SESSION_COOKIE_NAME)?.value
@@ -91,7 +63,6 @@ async function resolveProfile(request: NextRequest, isPost: boolean) {
   }
 
   // Sync DB role into JWT user_metadata so proxy can check without a DB call.
-  // This is a lightweight update that prevents the admin reload loop.
   if (current && current.role) {
     const metaRole = user.user_metadata?.role as string | undefined
     if (metaRole !== current.role) {
@@ -101,7 +72,7 @@ async function resolveProfile(request: NextRequest, isPost: boolean) {
           user_metadata: { ...user.user_metadata, role: current.role },
         })
       } catch {
-        // Non-critical — proxy falls back to allowing the request through
+        // Non-critical
       }
     }
   }

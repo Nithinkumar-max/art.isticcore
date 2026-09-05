@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from '@/lib/session-ttl'
-import {
-  SESSION_TOKEN_COOKIE,
-  establishSession,
-  sessionTokenCookieOptions,
-} from '@/lib/services/sessions'
 
 /**
  * POST /api/admin/login
  * Dedicated admin sign-in, independent of the customer login page.
  *
- * This accepts the ADMIN/SUPER_ADMIN email + password the team provisions via
+ * Accepts the ADMIN/SUPER_ADMIN email + password the team provisions via
  * scripts/create-admin.mjs (seeded with ADMIN_INITIAL_PASSWORD and ADMIN_EMAILS).
- * It performs a normal Supabase password sign-in, then insists the account is
+ * Performs a normal Supabase password sign-in, then insists the account is
  * actually an admin in public.users — a plain customer account is rejected.
  */
 export async function POST(request: NextRequest) {
@@ -47,7 +42,6 @@ export async function POST(request: NextRequest) {
     const role = profile?.role as string | undefined
 
     if (role !== 'ADMIN' && role !== 'SUPER_ADMIN') {
-      // Valid customer or unknown account — not an admin. Kill the session.
       await supabase.auth.signOut()
       return NextResponse.json(
         { error: 'This account is not authorized for the Studio. Sign in with an admin account.' },
@@ -55,12 +49,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Absolute 60-minute admin session — stamp login time for the proxy, and
-    // mint the single-session token (supersedes any earlier login anywhere).
+    // Stamp login-time cookie for the proxy's absolute 60-minute session timeout.
     const cookieStore = await (await import('next/headers')).cookies()
     cookieStore.set(SESSION_COOKIE_NAME, String(Date.now()), sessionCookieOptions())
-    const token = await establishSession(user.id)
-    cookieStore.set(SESSION_TOKEN_COOKIE, token, sessionTokenCookieOptions())
 
     return NextResponse.json({ ok: true, redirect: '/admin' })
   } catch (error: unknown) {

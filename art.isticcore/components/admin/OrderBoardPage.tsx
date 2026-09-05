@@ -13,14 +13,15 @@ import type { OrderStatus, OrderWithItems } from '@/types'
 // ─── Strict State Machine ───────────────────────────────────────────────
 // confirmed -> preparing -> ready_for_dispatch -> handed_over
 // Our responsibility ends at handover — final delivery is the courier's job.
-// cancelled / refunded are terminal off-board states.
+// handed_over is the terminal stage: no refund step exists.
+// cancelled remains the off-board exception; refunded is legacy display only.
 type BoardColumn = Exclude<OrderStatus, 'cancelled' | 'refunded'>
 
 const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  confirmed: ['preparing', 'cancelled', 'refunded'],
-  preparing: ['ready_for_dispatch', 'cancelled', 'refunded'],
-  ready_for_dispatch: ['handed_over', 'cancelled', 'refunded'],
-  handed_over: ['refunded'],
+  confirmed: ['preparing', 'cancelled'],
+  preparing: ['ready_for_dispatch', 'cancelled'],
+  ready_for_dispatch: ['handed_over', 'cancelled'],
+  handed_over: [],
   cancelled: [],
   refunded: [],
 }

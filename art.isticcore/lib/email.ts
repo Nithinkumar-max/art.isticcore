@@ -56,6 +56,53 @@ export async function sendLoginCodeEmail({
 }
 
 /**
+ * Send the self-generated password-reset code (bypasses Supabase SMTP).
+ */
+export async function sendPasswordResetEmail({
+  email,
+  code,
+}: {
+  email: string
+  code: string
+}) {
+  if (!resend) {
+    console.warn('[Resend] API key not configured. Cannot deliver reset code.')
+    return { success: false, reason: 'unconfigured' as const }
+  }
+
+  const emailHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Reset your Art.isticcore password</title></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #fafafa; margin: 0; padding: 24px; color: #171717;">
+        <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e5e5e5; padding: 32px; text-align: center;">
+          <h1 style="font-size: 22px; font-weight: 700; margin: 0; color: #ac2a5d; letter-spacing: 1px;">ARTISTICCORE🎀</h1>
+          <p style="margin: 4px 0 24px 0; font-size: 12px; color: #737373; text-transform: uppercase; letter-spacing: 2px;">Handcrafted Crochet</p>
+          <p style="font-size: 14px; color: #525252; margin: 0;">Use this code to reset your password:</p>
+          <div style="margin: 20px 0;">
+            <span style="display: inline-block; background: #fff0f5; border: 1px dashed #f3c1d3; border-radius: 12px; padding: 16px 28px; font-size: 34px; font-weight: 800; letter-spacing: 10px; color: #ac2a5d;">${code}</span>
+          </div>
+          <p style="font-size: 12px; color: #737373; margin: 0;">This code expires in 10 minutes and can be used once. If you didn't request it, you can safely ignore this email and your password will stay the same.</p>
+        </div>
+      </body>
+    </html>
+  `
+
+  try {
+    const data = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: `Your Art.isticcore password reset code: ${code}`,
+      html: emailHtml,
+    })
+    return { success: true, data }
+  } catch (error) {
+    console.error('[Resend] Failed to send reset code:', error)
+    return { success: false, error }
+  }
+}
+
+/**
  * Send order confirmation email
  */
 export async function sendOrderConfirmationEmail({

@@ -1,27 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from '@/lib/session-ttl'
-import {
-  SESSION_TOKEN_COOKIE,
-  revokeSession,
-  sessionTokenCookieOptions,
-} from '@/lib/services/sessions'
 
 /**
  * POST /api/admin/logout
- * Revokes the single-session token and signs the current admin out of both
- * the storefront auth session and the admin session cookie, then the client
- * redirects to /admin/login.
+ * Signs the current admin out of Supabase and clears the session-timeout
+ * cookie, then the client redirects to /admin/login.
  */
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get(SESSION_TOKEN_COOKIE)?.value
-    await revokeSession(token)
-
     const supabase = await createClient()
     await supabase.auth.signOut()
     const cookieStore = await (await import('next/headers')).cookies()
-    cookieStore.set(SESSION_TOKEN_COOKIE, '', { ...sessionTokenCookieOptions(), maxAge: 0 })
     cookieStore.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), maxAge: 0 })
     return NextResponse.json({ ok: true })
   } catch (error: unknown) {

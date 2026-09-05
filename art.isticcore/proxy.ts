@@ -1,32 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
-import { createClient as createSupabaseJsClient } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
 import { SESSION_COOKIE_NAME, SESSION_TIMEOUT_MS, sessionCookieOptions } from '@/lib/session-ttl'
-import {
-  SESSION_TOKEN_COOKIE,
-  isSessionValid,
-  sessionTokenCookieOptions,
-} from '@/lib/services/sessions'
-
-let _adminClient: ReturnType<typeof createSupabaseJsClient> | null = null
-function createAdminClient() {
-  if (_adminClient) return _adminClient
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!serviceKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY missing')
-  _adminClient = createSupabaseJsClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    serviceKey,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  )
-  return _adminClient
-}
-
-/** Carry sign-out cookies (cleared Supabase auth etc.) onto a redirect. */
-function copyClearedCookies(source: NextResponse, target: NextResponse) {
-  for (const cookie of source.cookies.getAll()) {
-    target.cookies.set(cookie)
-  }
-}
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -68,34 +42,11 @@ export async function proxy(request: NextRequest) {
     const pathname = request.nextUrl.pathname
     const isAdminAuthPage = pathname === '/admin/login'
 
-    // ── Single-Session Token Enforcement ──────────────────────────────────
-    // Exactly one active session per account (public.user_sessions, 1-hour
-    // life, mirrored by an httpOnly cookie). A missing / expired / superseded
-    // token means this browser is no longer the active session — sign it out
-    // so logging in from another browser or device invalidates it.
-    if (user && !(await isSessionValid(user.id, request.cookies.get(SESSION_TOKEN_COOKIE)?.value))) {
-      const isProtected = pathname.startsWith('/account') || (pathname.startsWith('/admin') && !isAdminAuthPage)
-      await supabase.auth.signOut()
-      supabaseResponse.cookies.set(SESSION_TOKEN_COOKIE, '', { ...sessionTokenCookieOptions(), maxAge: 0 })
-      supabaseResponse.cookies.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), maxAge: 0 })
-
-      if (isProtected) {
-        const url = request.nextUrl.clone()
-        url.pathname = pathname.startsWith('/admin') ? '/admin/login' : '/login'
-        url.searchParams.set('redirect', pathname)
-        url.searchParams.set('reason', 'session_revoked')
-        const response = NextResponse.redirect(url)
-        copyClearedCookies(supabaseResponse, response)
-        return response
-      }
-      return supabaseResponse
-    }
-
-    // ── Session Timeout (absolute 60 minutes since login) ────────────────────
-    // Supabase auto-refreshes access tokens (resetting `iat`), so JWT-iat checks
-    // never fire. Instead we stamp a login-time cookie (`art_session_start`) at
-    // every successful login and compare the wall-clock age. Sessions older than
-    // 60 minutes are signed out regardless of refresh activity.
+    // ── Session Timeout (absolute 60 minutes since login) ────────────────
+    // Supabase auto-refreshes access tokens (resetting `iat`), so JWT-iat
+    // checks never fire. Instead we stamp a login-time cookie (`art_session_start`)
+    // at every successful login and compare the wall-clock age. Sessions older
+    // than 60 minutes are signed out regardless of refresh activity.
     if (user) {
       const raw = request.cookies.get(SESSION_COOKIE_NAME)?.value
       const parsed = raw ? Number(raw) : NaN
@@ -111,8 +62,6 @@ export async function proxy(request: NextRequest) {
         await supabase.auth.signOut()
         const response = NextResponse.redirect(url)
         response.cookies.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), maxAge: 0 })
-        response.cookies.set(SESSION_TOKEN_COOKIE, '', { ...sessionTokenCookieOptions(), maxAge: 0 })
-        copyClearedCookies(supabaseResponse, response)
         return response
       }
 
@@ -141,9 +90,6 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(url)
       }
 
-      // ALWAYS check DB for admin role — JWT user_metadata is stale on page
-      // refresh because the client-side sync hasn't run yet. One lightweight
-      // query per admin navigation is acceptable.
       const { data: profile } = await supabase
         .from('users')
         .select('role')
@@ -152,7 +98,6 @@ export async function proxy(request: NextRequest) {
 
       const dbRole = profile?.role as string | undefined
       if (dbRole !== 'ADMIN' && dbRole !== 'SUPER_ADMIN') {
-        // Non-admin signed in → keep their session but send them to their home.
         const url = request.nextUrl.clone()
         url.pathname = '/'
         return NextResponse.redirect(url)

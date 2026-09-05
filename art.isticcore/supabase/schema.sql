@@ -92,7 +92,9 @@ CREATE TABLE public.users (
 );
 
 -- ============================================================
--- USER SESSIONS (single active session per account)
+-- USER SESSIONS (DEPRECATED / UNUSED — custom session tokens removed.
+-- Supabase's built-in cookie auth handles sessions now. Safe to drop
+-- this table: DROP TABLE public.user_sessions;)
 -- ============================================================
 CREATE TABLE public.user_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -407,6 +409,7 @@ CREATE TRIGGER order_status_change_audit
     EXECUTE FUNCTION public.log_order_status_change();
 
 -- Strict State Machine enforcement at DB layer — prevents invalid jumps (e.g. pending -> delivered)
+-- Handover is terminal: handed_over has no further transitions (no refund step).
 CREATE OR REPLACE FUNCTION public.enforce_order_status_transition()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -414,10 +417,10 @@ DECLARE
 BEGIN
   IF OLD.status IS DISTINCT FROM NEW.status THEN
     CASE OLD.status::TEXT
-      WHEN 'confirmed'          THEN allowed := ARRAY['preparing','cancelled','refunded'];
-      WHEN 'preparing'          THEN allowed := ARRAY['ready_for_dispatch','cancelled','refunded'];
-      WHEN 'ready_for_dispatch' THEN allowed := ARRAY['handed_over','cancelled','refunded'];
-      WHEN 'handed_over'        THEN allowed := ARRAY['refunded'];
+      WHEN 'confirmed'          THEN allowed := ARRAY['preparing','cancelled'];
+      WHEN 'preparing'          THEN allowed := ARRAY['ready_for_dispatch','cancelled'];
+      WHEN 'ready_for_dispatch' THEN allowed := ARRAY['handed_over','cancelled'];
+      WHEN 'handed_over'        THEN allowed := ARRAY[]::TEXT[];
       WHEN 'cancelled'          THEN allowed := ARRAY[]::TEXT[];
       WHEN 'refunded'           THEN allowed := ARRAY[]::TEXT[];
       ELSE allowed := ARRAY[]::TEXT[];

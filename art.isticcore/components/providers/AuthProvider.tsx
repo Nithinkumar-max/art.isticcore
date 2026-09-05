@@ -30,14 +30,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch('/api/auth/profile')
         if (!res.ok) return
         const body = await res.json()
-        // Session superseded / expired server-side (another login happened
-        // elsewhere): hard sign-out in every browser that isn't the active one.
-        if (body?.sessionRevoked) {
-          logout()
-          useCartStore.getState().clearCart()
-          window.location.href = '/login?reason=session_revoked'
-          return
-        }
         const profile = body?.profile as { id: string; email: string | null; name: string | null; phone: string | null; role: 'CUSTOMER' | 'ADMIN' | 'SUPER_ADMIN' } | null
         // The server stamps the login time; using it keeps the session bound to
         // when the user actually signed in (refreshing the page does NOT extend it).

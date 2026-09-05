@@ -1,10 +1,14 @@
 -- ============================================================
--- SINGLE-SESSION TOKENS — 2026-09-05
--- Every sign-in mints an opaque session token mirrored by an
--- httpOnly cookie. Rows live ~60 minutes; a new login on any
--- device deletes the account's older rows first, so exactly one
--- browser is active per account at a time. Anything else is a
--- "superseded" session and is signed out on its next request.
+-- UNUSED / DEPRECATED — custom session tokens (2026-09-05)
+-- ============================================================
+-- The custom per-browser session-token system was REMOVED on 2026-09-06 in
+-- favour of Supabase's built-in cookie auth, which naturally supports
+-- multiple tabs / browsers per account. The 1-hour absolute session timeout
+-- is enforced by the `art_session_start` cookie (session-ttl.ts) in the proxy
+-- middleware — no server-side lookup is needed.
+--
+-- This table is kept for reference only. Nothing reads or writes it anymore.
+-- It is safe to drop:  DROP TABLE public.user_sessions;
 -- ============================================================
 
 create table if not exists public.user_sessions (

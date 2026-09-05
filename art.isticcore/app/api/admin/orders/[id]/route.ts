@@ -7,12 +7,13 @@ const ORDER_STATUS_VALUES = [
   'confirmed', 'preparing', 'ready_for_dispatch', 'handed_over', 'cancelled', 'refunded',
 ] as const
 
-// Strict state-machine guard — prevents invalid jumps
+// Strict state-machine guard — prevents invalid jumps.
+// The workflow ends at handover: handed_over is terminal, no refund stage.
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  confirmed: ['preparing', 'cancelled', 'refunded'],
-  preparing: ['ready_for_dispatch', 'cancelled', 'refunded'],
-  ready_for_dispatch: ['handed_over', 'cancelled', 'refunded'],
-  handed_over: ['refunded'],
+  confirmed: ['preparing', 'cancelled'],
+  preparing: ['ready_for_dispatch', 'cancelled'],
+  ready_for_dispatch: ['handed_over', 'cancelled'],
+  handed_over: [],
   cancelled: [],
   refunded: [],
 }

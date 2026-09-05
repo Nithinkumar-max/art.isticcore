@@ -21,6 +21,9 @@ create table public.users (
   updated_at timestamptz not null default now()
 );
 
+-- user_sessions is DEPRECATED / UNUSED — custom session tokens removed.
+-- Supabase's built-in cookie auth handles sessions now. Kept for reference;
+-- safe to drop: DROP TABLE public.user_sessions;
 create table public.user_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
@@ -391,10 +394,10 @@ declare allowed text[];
 begin
   if old.status is distinct from new.status then
     case old.status::text
-      when 'confirmed' then allowed := array['preparing','cancelled','refunded'];
-      when 'preparing' then allowed := array['ready_for_dispatch','cancelled','refunded'];
-      when 'ready_for_dispatch' then allowed := array['handed_over','cancelled','refunded'];
-      when 'handed_over' then allowed := array['refunded'];
+      when 'confirmed' then allowed := array['preparing','cancelled'];
+      when 'preparing' then allowed := array['ready_for_dispatch','cancelled'];
+      when 'ready_for_dispatch' then allowed := array['handed_over','cancelled'];
+      when 'handed_over' then allowed := array[]::text[];
       when 'cancelled' then allowed := array[]::text[];
       when 'refunded' then allowed := array[]::text[];
       else allowed := array[]::text[];

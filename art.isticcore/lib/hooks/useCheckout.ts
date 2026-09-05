@@ -53,15 +53,12 @@ export function useCheckout() {
         throw new Error('Your cart is empty')
       }
 
-      // Guard against stale/preview items (e.g. mock ids from before the
-      // catalog existed) so checkout fails with a helpful message.
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
       const staleItem = items.find((i) => !uuidPattern.test(i.productId))
       if (staleItem) {
         throw new Error(`"${staleItem.name}" is a preview item and can't be ordered. Please remove it from your bag and add it again from the Shop page.`)
       }
 
-      // 1. Create order on server
       const createRes = await fetch('/api/checkout/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -84,7 +81,6 @@ export function useCheckout() {
 
       const { order, razorpayOrderId, razorpayKeyId } = orderData
 
-      // 2. Open Razorpay (UPI) checkout
       const scriptLoaded = await loadRazorpayScript()
       if (!scriptLoaded) {
         throw new Error('Could not load payment gateway. Please check your internet connection.')
@@ -129,10 +125,10 @@ export function useCheckout() {
 
             clearCart()
             if (onSuccess) onSuccess(order.id)
-            router.push(`/orders/${order.id}`)
           } catch (verifyErr: unknown) {
             const msg = verifyErr instanceof Error ? verifyErr.message : 'Verification failed'
             setError(msg)
+            setIsSubmitting(false)
           }
         },
         modal: {

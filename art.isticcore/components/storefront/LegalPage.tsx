@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { CONTACT_EMAIL } from '@/lib/contact'
 
 export interface LegalSection {
   heading: string
@@ -32,7 +33,7 @@ export function LegalPage({ title, updated, intro, sections }: {
             </article>
           ))}
         </div>
-        <p className="mt-10 text-center text-xs text-on-surface-variant">Questions? Write to <a href="mailto:hello@artisticcore.in" className="text-primary underline">hello@artisticcore.in</a></p>
+        <p className="mt-10 text-center text-xs text-on-surface-variant">Questions? Write to <a href={`mailto:${CONTACT_EMAIL}`} className="text-primary underline">{CONTACT_EMAIL}</a></p>
       </section>
     </main>
   )

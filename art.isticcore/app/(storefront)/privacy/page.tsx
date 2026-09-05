@@ -22,7 +22,7 @@ export default function PrivacyRoute() {
           heading: 'How we use it',
           body: [
             'To craft, pack, and deliver your orders — and to keep you updated about them.',
-            'To provide support over WhatsApp, email, or phone when you reach out.',
+            'To provide support over email when you reach out.',
             'We never sell your personal data to anyone, ever.',
           ],
         },
@@ -37,7 +37,7 @@ export default function PrivacyRoute() {
           heading: 'Data security & your rights',
           body: [
             'Data is stored with Supabase (PostgreSQL) using industry-standard encryption and row-level security.',
-            'You may request a copy of your data, corrections, or deletion of your account at any time by writing to hello@artisticcore.in.',
+            'You may request a copy of your data, corrections, or deletion of your account at any time by writing to artisticcore@gmail.com.',
           ],
         },
       ]}

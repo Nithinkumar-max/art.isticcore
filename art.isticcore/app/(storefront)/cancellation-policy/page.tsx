@@ -13,7 +13,7 @@ export default function CancellationRoute() {
           heading: 'Before production begins',
           body: [
             'You can cancel within 24 hours of placing your order for a full refund — no questions asked.',
-            'Write to hello@artisticcore.in or message us on WhatsApp with your order number.',
+            'Write to artisticcore@gmail.com with your order number.',
           ],
         },
         {

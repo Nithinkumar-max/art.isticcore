@@ -58,7 +58,7 @@ export async function submitReview({
       .select('id, orders!inner(user_id, status)')
       .eq('product_id', productId)
       .eq('orders.user_id', userId)
-      .eq('orders.status', 'DELIVERED')
+      .eq('orders.status', 'delivered')
       .limit(1)
       .single()
 

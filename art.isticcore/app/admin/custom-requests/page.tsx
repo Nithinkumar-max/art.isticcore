@@ -101,18 +101,17 @@ export default function AdminCustomRequestsRoute() {
               >
                 <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${request.status === 'NEW' ? 'bg-[#d84c55] animate-pulse' : 'bg-outline'}`} aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-serif text-sm font-semibold">{request.name}</span>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-serif text-sm font-semibold">{request.name}</span>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${STATUS_TONES[request.status] ?? ''}`}>{request.status.replace(/_/g, ' ')}</span>
                   </div>
-                  <p className="mt-0.5 flex items-center gap-2 text-xs text-on-surface-variant">
-                    <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{request.contact}</span>
-                    {request.email ? <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{request.email}</span> : null}
+                  <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-on-surface-variant">
+                    <span className="flex shrink-0 items-center gap-1"><Phone className="h-3 w-3" />{request.contact}</span>
+                    {request.email ? <span className="flex min-w-0 items-center gap-1"><MessageCircle className="h-3 w-3" /><span className="truncate">{request.email}</span></span> : null}
                     <span className="ml-auto shrink-0">{formatDate(request.created_at)}</span>
                   </p>
                 </div>
                 <span className="hidden shrink-0 text-xs text-on-surface-variant sm:block">{request.budget ? `₹${request.budget.toLocaleString('en-IN')}` : '—'}</span>
-                <span className="shrink-0 text-xs text-on-surface-variant">{request.description.slice(0, 30)}...</span>
               </button>
             ))}
           </div>
@@ -159,13 +158,13 @@ export default function AdminCustomRequestsRoute() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-2xl bg-surface-container-low px-4 py-3">
+                  <div className="min-w-0 rounded-2xl bg-surface-container-low px-4 py-3">
                     <dt className="text-xs text-on-surface-variant">Phone</dt>
-                    <dd className="mt-0.5 font-medium">{selected.contact}</dd>
+                    <dd className="mt-0.5 break-words font-medium">{selected.contact}</dd>
                   </div>
-                  <div className="rounded-2xl bg-surface-container-low px-4 py-3">
+                  <div className="min-w-0 rounded-2xl bg-surface-container-low px-4 py-3">
                     <dt className="text-xs text-on-surface-variant">Email</dt>
-                    <dd className="mt-0.5 font-medium">{selected.email || '—'}</dd>
+                    <dd className="mt-0.5 break-all font-medium">{selected.email || '—'}</dd>
                   </div>
                   <div className="rounded-2xl bg-surface-container-low px-4 py-3">
                     <dt className="text-xs text-on-surface-variant">Budget</dt>

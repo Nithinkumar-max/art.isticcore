@@ -43,10 +43,17 @@ begin
   ) into has_legacy;
 
   if has_legacy then
-    create type public.order_status_simplified as enum (
+create type public.order_status_simplified as enum (
       'confirmed', 'preparing', 'ready_for_dispatch', 'handed_over',
       'cancelled', 'refunded'
     );
+
+    -- The status triggers reference old.status/new.status in their WHEN
+    -- clauses, which blocks altering the column type. Drop them now; the
+    -- audit trigger is recreated below, enforce_order_status_transition is
+    -- recreated by step 2.
+    drop trigger if exists enforce_order_status_transition on public.orders;
+    drop trigger if exists order_status_change_audit on public.orders;
 
     alter table public.orders
       alter column status drop default,
@@ -86,8 +93,19 @@ begin
     drop type public.order_status;
     alter type public.order_status_simplified rename to order_status;
 
-    alter table public.orders
+alter table public.orders
       alter column status set default 'confirmed'::public.order_status;
+
+    -- Restore the status-history audit trail (function ships with init).
+    if exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where p.proname = 'log_order_status_change' and n.nspname = 'public'
+    ) then
+      create trigger order_status_change_audit
+        before update on public.orders
+        for each row when (old.status is distinct from new.status)
+        execute function public.log_order_status_change();
+    end if;
   end if;
 end; $$;
 

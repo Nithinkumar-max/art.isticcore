@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Could not attach images' }, { status: 500 })
     }
 
-    await cache.invalidatePrefix('products:')
+    await cache.invalidatePrefix('product')
 
     return NextResponse.json({ success: true, count: rows.length }, { status: 201 })
   } catch (error: unknown) {

@@ -64,7 +64,7 @@ export function ProductListPage() {
                 <tr key={product.id} className="group">
                   <td className="px-4 py-3">
                     <Link href={`/admin/products/${product.id}`} className="flex items-center gap-3">
-                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-surface-container-low"><img src={product.images?.[0]?.url || ''} alt="" className="h-full w-full object-cover" /></div>
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-surface-container-low"><img src={product.images?.[0]?.url || '/images/product-placeholder.svg'} alt="" className="h-full w-full object-cover" /></div>
                       <div><p className="font-medium group-hover:text-primary">{product.name}</p><p className="text-xs text-on-surface-variant">{product.slug}</p></div>
                     </Link>
                   </td>

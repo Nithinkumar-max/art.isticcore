@@ -114,8 +114,15 @@ export async function getProducts(
   const total = count ?? 0
   const totalPages = Math.ceil(total / limit)
 
+  const products = ((data as unknown as ProductWithRelations[]) || []).map((p) => {
+    if (p.images?.length) {
+      p.images.sort((a, b) => a.display_order - b.display_order)
+    }
+    return p
+  })
+
   return {
-    data: (data as unknown as ProductWithRelations[]) || [],
+    data: products,
     total,
     page,
     limit,

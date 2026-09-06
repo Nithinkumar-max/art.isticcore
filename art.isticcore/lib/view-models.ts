@@ -30,7 +30,7 @@ export interface ProductCardModel {
   isBestseller: boolean
 }
 
-const FALLBACK_IMAGE = '/images/product-placeholder.webp'
+const FALLBACK_IMAGE = '/images/product-placeholder.svg'
 
 export function mapProductToCard(product: ProductWithRelations): ProductCardModel {
   const firstImage = product.images?.[0]?.url || FALLBACK_IMAGE

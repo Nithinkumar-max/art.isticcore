@@ -183,7 +183,7 @@ export function BestsellersSection({ products }: BestsellersSectionProps) {
           reviewsCount: 15,
           isBestseller: p.is_bestseller,
           badge: p.is_bestseller ? 'Bestseller' : p.is_featured ? 'Featured' : null,
-          imageUrl: p.images?.[0]?.url || '/placeholder-product.webp',
+          imageUrl: p.images?.[0]?.url || '/images/product-placeholder.svg',
         }))
       : FALLBACK_PRODUCTS
 

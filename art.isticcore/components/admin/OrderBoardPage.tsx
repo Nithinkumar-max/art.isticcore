@@ -3,12 +3,12 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Check, ChevronRight, Clock3, Download, FileText, Filter, Hand, Package, RefreshCw, Search, Truck, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronRight, Clock3, Download, FileText, Hand, Package, RefreshCw, RotateCcw, Search, Trash2, Truck, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatPrice } from '@/lib/utils'
 import { ORDER_STATUS_MAP } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
-import type { OrderStatus, OrderWithItems } from '@/types'
+import type { OrderStatus, OrderWithItems, PaymentStatus } from '@/types'
 
 // ─── Strict State Machine ───────────────────────────────────────────────
 // confirmed -> preparing -> ready_for_dispatch -> handed_over
@@ -64,6 +64,32 @@ type AdminOrderRow = OrderWithItems & {
   items: Array<{ name: string; quantity: number; price: number; product?: { name: string } | null }>
 }
 
+type RefundState = 'pending' | 'refunded' | 'partial' | 'none'
+
+// Refund tracking, derived from the payment row (source of truth for the gateway).
+function refundState(order: AdminOrderRow | null | undefined): RefundState {
+  if (!order || order.status !== 'cancelled') return 'none'
+  const status = (order.payment?.status ?? order.payment_status) as PaymentStatus | undefined
+  if (status === 'refunded') return 'refunded'
+  if (status === 'partially_refunded') return 'partial'
+  if (status === 'paid') return 'pending'
+  return 'none'
+}
+
+const REFUND_STATE_META: Record<Exclude<RefundState, 'none'>, { label: string; className: string }> = {
+  pending: { label: 'Refund pending', className: 'bg-[#fff5df] text-secondary border-secondary/30' },
+  refunded: { label: 'Refunded', className: 'bg-surface-container text-on-surface-variant border-admin-border' },
+  partial: { label: 'Partially refunded', className: 'bg-[#ffeef2] text-error border-error/30' },
+}
+
+function RefundBadge({ state }: { state: RefundState }) {
+  if (state === 'none') {
+    return <span className="rounded-full border border-admin-border px-2.5 py-1 text-[11px] font-bold tracking-wider text-on-surface-variant/70">Not prepaid</span>
+  }
+  const meta = REFUND_STATE_META[state]
+  return <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold tracking-wider ${meta.className}`}>{meta.label}</span>
+}
+
 function PillBadge({ status }: { status: OrderStatus }) {
   const meta = ORDER_STATUS_MAP[status] ?? { label: status, bgColor: 'bg-surface-container', color: 'text-on-surface-variant', dot: 'bg-outline' }
   return (
@@ -78,8 +104,10 @@ export function OrderBoardPage() {
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [view, setView] = useState<'board' | 'list'>('board')
+  const [view, setView] = useState<'board' | 'list' | 'cancelled'>('board')
   const [notice, setNotice] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; orderNumber: string; prepaid: boolean } | null>(null)
+  const [deleteConfirmTyped, setDeleteConfirmTyped] = useState('')
 
   const { data, isLoading, isError, isRefetching, refetch } = useQuery<AdminOrderRow[]>({
     queryKey: ['admin-orders'],
@@ -88,6 +116,16 @@ export function OrderBoardPage() {
       if (!res.ok) throw new Error('Could not load orders')
       return res.json()
     },
+  })
+
+  const cancelledData = useQuery<AdminOrderRow[]>({
+    queryKey: ['admin-orders-cancelled'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/orders?status=cancelled')
+      if (!res.ok) throw new Error('Could not load cancelled orders')
+      return res.json()
+    },
+    enabled: view === 'cancelled',
   })
 
   const [realtimeState, setRealtimeState] = useState<'connected' | 'connecting' | 'reconnecting'>('connecting')
@@ -137,6 +175,14 @@ export function OrderBoardPage() {
           const meta = ORDER_STATUS_MAP[row.status as string]
           flashNotice(`${row.order_number ?? row.id.slice(0, 8)} → ${meta?.label ?? row.status}`)
         }
+      } else if (eventType === 'DELETE') {
+        const deletedRow = payload.old as unknown as AdminOrderRow
+        queryClient.setQueryData<AdminOrderRow[]>(['admin-orders'], (curr) =>
+          (curr ?? []).filter((o) => o.id !== deletedRow.id),
+        )
+        queryClient.setQueryData<AdminOrderRow[]>(['admin-orders-cancelled'], (curr) =>
+          (curr ?? []).filter((o) => o.id !== deletedRow.id),
+        )
       }
     }
 
@@ -208,27 +254,39 @@ export function OrderBoardPage() {
     [data],
   )
 
-  const selected = orders.find((o) => o.id === selectedId) ?? (data ?? []).find((o) => o.id === selectedId) as unknown as BoardOrder | null
-  // Fallback: if selected is cancelled/refunded not in board, fabricate minimal view
+  const selected = orders.find((o) => o.id === selectedId) ?? null
+  // Fallback: if selected is cancelled/refunded not in board, fabricate a full
+  // BoardOrder from the raw row so the drawer (and refund tracking) works.
   const selectedOrderRaw = useMemo(() => {
     if (selected) return selected
-    const raw = (data ?? []).find((o) => o.id === selectedId) as unknown as AdminOrderRow | undefined
+    const raw = ((data ?? []).concat(cancelledData.data ?? []).find((o) => o.id === selectedId)) as unknown as AdminOrderRow | undefined
     if (!raw) return null
     const col = columnForStatus(raw.status as OrderStatus)
+    const items = raw.items ?? []
+    const productName = items.map((i) => i.name).join(' + ') || 'Custom request'
     return {
       id: raw.id,
       orderNumber: raw.order_number,
       status: raw.status as OrderStatus,
       column: (col ?? 'confirmed') as BoardColumn,
-      productName: raw.items?.map((i) => i.name).join(' + ') || 'Custom request',
+      productName,
+      itemCount: items.length,
       customerName: raw.address?.full_name || raw.user?.name || 'Guest customer',
+      customerEmail: raw.user?.email || undefined,
       price: Number(raw.total),
       progress: col ? (PROGRESS_BY_COLUMN[col] ?? 0) : 0,
+      note: raw.customer_note || undefined,
       paymentLabel: `${raw.payment_method} · ${raw.payment_status}`,
       ageLabel: formatDistanceToNow(new Date(raw.created_at), { addSuffix: true }),
+      courier: raw.courier_name || undefined,
       raw,
     } as BoardOrder
-  }, [selected, data, selectedId])
+  }, [selected, data, cancelledData.data, selectedId])
+
+  const selectedRaw = selectedOrderRaw?.raw as unknown as AdminOrderRow | undefined
+  const selectedPrepaid = selectedRaw
+    ? ['paid', 'refunded', 'partially_refunded'].includes(String(selectedRaw.payment?.status ?? selectedRaw.payment_status))
+    : false
 
   const visible = useMemo(
     () => orders.filter((o) => `${o.orderNumber} ${o.productName} ${o.customerName}`.toLowerCase().includes(search.toLowerCase())),
@@ -236,6 +294,16 @@ export function OrderBoardPage() {
   )
 
   const stats: Array<[string, string]> = columns.map((c) => [c.label, String(orders.filter((o) => o.column === c.id).length)])
+
+  const cancelledOrders: AdminOrderRow[] = useMemo(
+    () =>
+      (cancelledData.data ?? [])
+        .filter((o) => `${o.order_number} ${o.customer_note ?? ''} ${o.address?.full_name ?? ''} ${o.user?.name ?? ''}`.toLowerCase().includes(search.toLowerCase()))
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [cancelledData.data, search],
+  )
+
+  const refundPendingCount = useMemo(() => cancelledOrders.filter((o) => refundState(o) === 'pending').length, [cancelledOrders])
 
   const moveOrder = async (order: BoardOrder, nextStatus: OrderStatus) => {
     const allowed = VALID_TRANSITIONS[order.status] ?? []
@@ -276,6 +344,49 @@ export function OrderBoardPage() {
       flashNotice(`Could not cancel ${order.orderNumber}.`)
     } finally {
       void refetch()
+    }
+  }
+
+  const deleteOrder = async (orderId: string) => {
+    setDeleteTarget(null)
+    setSelectedId(null)
+    try {
+      const res = await fetch(`/api/admin/orders/${orderId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('delete failed')
+      queryClient.setQueryData<AdminOrderRow[]>(['admin-orders'], (curr) => (curr ?? []).filter((o) => o.id !== orderId))
+      queryClient.setQueryData<AdminOrderRow[]>(['admin-orders-cancelled'], (curr) => (curr ?? []).filter((o) => o.id !== orderId))
+      flashNotice('Order deleted permanently.')
+      void refetch()
+    } catch {
+      flashNotice('Could not delete the order. Try again.')
+    }
+  }
+
+  const markRefunded = async (orderId: string, refunded: boolean) => {
+    try {
+      const res = await fetch(`/api/admin/orders/${orderId}/refund`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refunded }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'update failed')
+      const paymentStatus: PaymentStatus = refunded ? 'refunded' : 'paid'
+      queryClient.setQueryData<AdminOrderRow[]>(['admin-orders-cancelled'], (curr) =>
+        (curr ?? []).map((o) =>
+          o.id === orderId
+            ? {
+                ...o,
+                payment_status: paymentStatus as AdminOrderRow['payment_status'],
+                payment: o.payment ? { ...o.payment, status: paymentStatus } : o.payment,
+              }
+            : o,
+        ),
+      )
+      flashNotice(refunded ? 'Refund marked as done.' : 'Refund status reverted to paid.')
+      void refetch()
+    } catch (e: unknown) {
+      flashNotice(e instanceof Error ? e.message : 'Could not update refund status.')
     }
   }
 
@@ -330,10 +441,16 @@ export function OrderBoardPage() {
             </button>
             <button
               type="button"
-              className="focus-ring flex min-h-10 items-center gap-2 rounded-full border border-admin-border bg-surface px-4 text-sm text-on-surface-variant hover:border-primary hover:text-primary"
+              onClick={() => setView('cancelled')}
+              className={`focus-ring flex min-h-10 items-center gap-2 rounded-full border px-4 text-sm ${view === 'cancelled' ? 'border-primary bg-surface text-primary soft-shadow' : 'border-admin-border bg-surface text-on-surface-variant'}`}
             >
-              <Filter className="h-4 w-4" />
-              Filter
+              <X className="h-4 w-4" />
+              Cancelled
+              {view === 'cancelled' && refundPendingCount > 0 ? (
+                <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-white" title={`${refundPendingCount} prepaid order${refundPendingCount === 1 ? '' : 's'} awaiting refund`}>
+                  {refundPendingCount}
+                </span>
+              ) : null}
             </button>
             <button
               type="button"
@@ -411,6 +528,116 @@ export function OrderBoardPage() {
               Retry
             </button>
           </div>
+        ) : view === 'cancelled' ? (
+          cancelledData.isLoading ? (
+            <div className="mt-6 grid min-h-[320px] gap-4 lg:grid-cols-4 xl:grid-cols-7">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-36 animate-pulse rounded-2xl bg-surface-container-low admin-shadow" aria-hidden="true" />
+              ))}
+            </div>
+          ) : !cancelledOrders.length ? (
+            <div className="mt-6 flex min-h-64 flex-col items-center justify-center rounded-[28px] border border-dashed border-admin-border bg-surface p-8 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-background-soft-pink text-primary">
+                <X className="h-7 w-7" />
+              </div>
+              <p className="mt-4 font-serif text-3xl font-semibold tracking-tight">No cancelled orders</p>
+              <p className="mt-2 max-w-sm text-sm leading-relaxed text-on-surface-variant">
+                Cancelled prepaid orders appear here with a <em className="font-serif">Refund pending</em> badge so you can reconcile refunds in the Razorpay dashboard.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-6 overflow-hidden rounded-3xl border border-admin-border bg-surface admin-shadow">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-admin-border bg-surface-container-low px-5 py-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-bg-secondary/40 bg-surface px-3 py-1.5 text-xs font-bold text-secondary">Refund pending: {refundPendingCount}</span>
+                  <span className="rounded-full border border-admin-border bg-surface px-3 py-1.5 text-xs font-bold text-on-surface-variant">Total cancelled: {cancelledOrders.length}</span>
+                </div>
+                <p className="text-xs text-on-surface-variant">Refunds are processed in the Razorpay dashboard — mark them done here to reconcile.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[920px] text-left text-sm">
+                  <thead className="border-b border-admin-border bg-surface-container-low text-xs uppercase tracking-wider text-on-surface-variant">
+                    <tr>
+                      <th className="px-5 py-4 font-semibold">Order</th>
+                      <th className="px-5 py-4 font-semibold">Customer</th>
+                      <th className="px-5 py-4 font-semibold">Item</th>
+                      <th className="px-5 py-4 font-semibold">Total</th>
+                      <th className="px-5 py-4 font-semibold">Refund</th>
+                      <th className="px-5 py-4" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-admin-border">
+                    {cancelledOrders.map((order) => {
+                      const state = refundState(order)
+                      const customerText = order.address?.full_name || order.user?.name || 'Guest customer'
+                      const itemText = (order.items ?? []).map((i) => i.name).join(' + ') || 'Custom request'
+                      return (
+                        <tr key={order.id} className="hover:bg-background-warm/60">
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs">#{order.order_number}</span>
+                              <PillBadge status="cancelled" />
+                            </div>
+                            <span className="mt-1 block text-[10px] uppercase tracking-wider text-on-surface-variant">{formatDistanceToNow(new Date(order.updated_at ?? order.created_at), { addSuffix: true })}</span>
+                          </td>
+                          <td className="px-5 py-4">
+                            <span className="font-medium">{customerText}</span>
+                            {order.user?.email ? <span className="block text-xs text-on-surface-variant">{order.user.email}</span> : null}
+                          </td>
+                          <td className="px-5 py-4">
+                            <span className="line-clamp-1">{itemText}</span>
+                            <span className="text-xs text-on-surface-variant">{order.items?.length ?? 0} line item{(order.items?.length ?? 0) === 1 ? '' : 's'} · {order.payment_method}</span>
+                          </td>
+                          <td className="px-5 py-4 font-serif font-semibold">{formatPrice(Number(order.total))}</td>
+                          <td className="px-5 py-4">
+                            <RefundBadge state={state} />
+                          </td>
+                          <td className="px-5 py-4">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {state === 'pending' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void markRefunded(order.id, true)}
+                                  className="focus-ring inline-flex items-center gap-1 rounded-full border border-success/40 bg-[#eaf8ee] px-3 py-1.5 text-xs font-semibold text-success hover:bg-success/10"
+                                  title="Mark this prepaid order as refunded (process the refund in Razorpay first)"
+                                >
+                                  <Check className="h-3.5 w-3.5" /> Mark refunded
+                                </button>
+                              ) : state === 'refunded' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void markRefunded(order.id, false)}
+                                  className="focus-ring inline-flex items-center gap-1 rounded-full border border-admin-border bg-surface px-3 py-1.5 text-xs font-medium text-on-surface-variant hover:border-primary hover:text-primary"
+                                  title="Revert refund status (mistake correction)"
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" /> Undo
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedId(order.id)}
+                                className="focus-ring inline-flex items-center gap-1 text-sm font-semibold text-primary hover:text-primary-dark"
+                              >
+                                View <ChevronRight className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteTarget({ id: order.id, orderNumber: order.order_number, prepaid: state !== 'none' })}
+                                className="focus-ring rounded-full p-2 text-error/70 hover:bg-[#fff0f0] hover:text-error"
+                                title="Delete this order permanently"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
         ) : !orders.length ? (
           <div className="mt-6 flex min-h-64 flex-col items-center justify-center rounded-[28px] border border-dashed border-admin-border bg-surface p-8 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-background-soft-pink text-primary">
@@ -496,6 +723,83 @@ export function OrderBoardPage() {
         ) : null}
       </div>
 
+      {/* Hard-delete confirmation — typed order number required */}
+      <AnimatePresence>
+        {deleteTarget ? (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.button
+              type="button"
+              className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+              aria-label="Cancel delete"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeleteTarget(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="relative w-full max-w-md rounded-3xl border border-admin-border bg-surface p-6 soft-shadow sm:p-7"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#fff0f0] text-error">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-2xl font-semibold tracking-tight">Delete order #{deleteTarget.orderNumber}?</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-on-surface-variant">
+                    This permanently removes the order, its items and payment record. This cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              {deleteTarget.prepaid ? (
+                <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-warning/30 bg-[#fff5df] px-4 py-3 text-xs leading-relaxed text-secondary">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    This order was <strong>prepaid</strong>. Make sure the refund has been processed in the Razorpay dashboard before deleting — this record is your proof of payment.
+                  </span>
+                </div>
+              ) : null}
+
+              <label className="mt-5 block text-xs font-medium text-on-surface-variant">
+                Type <span className="font-mono font-semibold text-error">#{deleteTarget.orderNumber}</span> to confirm
+                <input
+                  value={deleteConfirmTyped}
+                  onChange={(e) => setDeleteConfirmTyped(e.target.value)}
+                  placeholder={deleteTarget.orderNumber}
+                  autoFocus
+                  className="focus-ring mt-2 w-full rounded-xl border border-admin-border bg-background-warm px-4 py-2.5 font-mono text-sm"
+                />
+              </label>
+
+              <div className="mt-6 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteTarget(null)
+                    setDeleteConfirmTyped('')
+                  }}
+                  className="focus-ring flex min-h-11 flex-1 items-center justify-center rounded-full border border-admin-border bg-surface text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low"
+                >
+                  Keep order
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteConfirmTyped.trim().toLowerCase() !== deleteTarget.orderNumber.toLowerCase()}
+                  onClick={() => void deleteOrder(deleteTarget.id)}
+                  className="focus-ring flex min-h-11 flex-1 items-center justify-center gap-2 rounded-full bg-error px-3 text-sm font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Trash2 className="h-4 w-4" /> Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        ) : null}
+      </AnimatePresence>
+
       <AnimatePresence>
         {selectedOrderRaw ? (
           <div className="fixed inset-0 z-50">
@@ -569,54 +873,98 @@ export function OrderBoardPage() {
 
               {selectedOrderRaw.note ? <p className="mt-6 rounded-xl bg-surface-container-low px-4 py-3 text-xs leading-relaxed text-on-surface-variant">Note: {selectedOrderRaw.note}</p> : null}
 
-              {/* State-machine stepper — only valid next transitions */}
-              <div className="mt-8">
-                <h3 className="font-serif text-xl font-semibold">Move order</h3>
-                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">Only valid next states are shown. Invalid jumps (e.g. confirmed → handed_over) are blocked by DB & API. Transitions auto-log to status_history.</p>
-                <div className="mt-4 grid gap-2">
-                  {(() => {
-                    const valid = VALID_TRANSITIONS[selectedOrderRaw.status] ?? []
-                    if (!valid.length) {
-                      return <p className="rounded-xl bg-surface-container-low px-4 py-3 text-center text-xs text-on-surface-variant">No further moves — terminal state</p>
-                    }
-                    return valid.map((next) => {
-                      const meta = ORDER_STATUS_MAP[next]
-                      const isCurrent = selectedOrderRaw.status === next
-                      return (
-                        <button
-                          key={next}
-                          type="button"
-                          disabled={isCurrent}
-                          onClick={() => void moveOrder(selectedOrderRaw, next)}
-                          className="focus-ring flex min-h-11 items-center justify-between rounded-full border border-admin-border bg-surface px-4 text-left text-sm transition hover:border-primary hover:text-primary disabled:bg-surface-container-low disabled:text-on-surface-variant"
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${meta?.dot ?? 'bg-outline'}`} />
-                            {meta?.label ?? next}
-                          </span>
-                          {isCurrent ? <Check className="h-4 w-4 text-success" /> : <ChevronRight className="h-4 w-4" />}
-                        </button>
-                      )
-                    })
-                  })()}
-                </div>
-                {/* Visual stepper */}
-                <div className="mt-6 flex items-center gap-1.5 overflow-x-auto pb-2">
-                  {columns.map((c, idx) => {
-                    const isActive = c.id === selectedOrderRaw.status
-                    const isPast = columns.findIndex((x) => x.id === selectedOrderRaw.status) > idx
-                    return (
-                      <div key={c.id} className="flex items-center gap-1.5">
-                        <span className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold ${isActive ? 'bg-primary text-white' : isPast ? 'bg-success text-white' : 'bg-surface-container text-on-surface-variant'}`}>
-                          {isPast ? <Check className="h-3.5 w-3.5" /> : idx + 1}
-                        </span>
-                        <span className={`hidden text-[10px] font-medium sm:inline ${isActive ? 'text-primary' : 'text-on-surface-variant'}`}>{c.label}</span>
-                        {idx < columns.length - 1 ? <span className="mx-1 h-px w-4 bg-admin-border" /> : null}
+              {selectedOrderRaw.status === 'cancelled' ? (
+                <div className="mt-8">
+                  <h3 className="font-serif text-xl font-semibold">Refund tracking</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">Refunds are processed in the Razorpay dashboard. Mark it done here so the cancelled ledger reflects reality.</p>
+                  <div className="mt-4 rounded-2xl border border-admin-border bg-background-warm p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs text-on-surface-variant">Payment</p>
+                        <p className="mt-0.5 font-medium">{selectedOrderRaw.paymentLabel}</p>
                       </div>
-                    )
-                  })}
+                      <RefundBadge state={refundState(selectedOrderRaw?.raw as AdminOrderRow)} />
+                    </div>
+                    {(() => {
+                      const state = refundState(selectedOrderRaw?.raw as AdminOrderRow)
+                      if (state === 'pending') {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => void markRefunded(selectedOrderRaw.id, true)}
+                            className="focus-ring mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-success py-2 text-sm font-bold text-white hover:opacity-90"
+                          >
+                            <Check className="h-4 w-4" /> Mark refunded
+                          </button>
+                        )
+                      }
+                      if (state === 'refunded') {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => void markRefunded(selectedOrderRaw.id, false)}
+                            className="focus-ring mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-admin-border bg-surface py-2 text-sm font-medium text-on-surface-variant hover:border-primary hover:text-primary"
+                          >
+                            <RotateCcw className="h-4 w-4" /> Undo — back to refund pending
+                          </button>
+                        )
+                      }
+                      return <p className="mt-4 rounded-xl bg-surface-container-low px-4 py-3 text-center text-xs text-on-surface-variant">No prepaid payment to refund</p>
+                    })()}
+                  </div>
+                  <p className="mt-3 rounded-xl bg-surface-container-low px-4 py-3 text-xs leading-relaxed text-on-surface-variant">
+                    This order is terminal and can't be moved. Delete it only if it's a duplicate/test entry — prepaid records are also your proof of payment for refunds.
+                  </p>
                 </div>
-              </div>
+              ) : (
+                <div className="mt-8">
+                  <h3 className="font-serif text-xl font-semibold">Move order</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">Only valid next states are shown. Invalid jumps (e.g. confirmed → handed_over) are blocked by DB & API. Transitions auto-log to status_history.</p>
+                  <div className="mt-4 grid gap-2">
+                    {(() => {
+                      const valid = VALID_TRANSITIONS[selectedOrderRaw.status] ?? []
+                      if (!valid.length) {
+                        return <p className="rounded-xl bg-surface-container-low px-4 py-3 text-center text-xs text-on-surface-variant">No further moves — terminal state</p>
+                      }
+                      return valid.map((next) => {
+                        const meta = ORDER_STATUS_MAP[next]
+                        const isCurrent = selectedOrderRaw.status === next
+                        return (
+                          <button
+                            key={next}
+                            type="button"
+                            disabled={isCurrent}
+                            onClick={() => void moveOrder(selectedOrderRaw, next)}
+                            className="focus-ring flex min-h-11 items-center justify-between rounded-full border border-admin-border bg-surface px-4 text-left text-sm transition hover:border-primary hover:text-primary disabled:bg-surface-container-low disabled:text-on-surface-variant"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className={`h-2 w-2 rounded-full ${meta?.dot ?? 'bg-outline'}`} />
+                              {meta?.label ?? next}
+                            </span>
+                            {isCurrent ? <Check className="h-4 w-4 text-success" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                        )
+                      })
+                    })()}
+                  </div>
+                  {/* Visual stepper */}
+                  <div className="mt-6 flex items-center gap-1.5 overflow-x-auto pb-2">
+                    {columns.map((c, idx) => {
+                      const isActive = c.id === selectedOrderRaw.status
+                      const isPast = columns.findIndex((x) => x.id === selectedOrderRaw.status) > idx
+                      return (
+                        <div key={c.id} className="flex items-center gap-1.5">
+                          <span className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold ${isActive ? 'bg-primary text-white' : isPast ? 'bg-success text-white' : 'bg-surface-container text-on-surface-variant'}`}>
+                            {isPast ? <Check className="h-3.5 w-3.5" /> : idx + 1}
+                          </span>
+                          <span className={`hidden text-[10px] font-medium sm:inline ${isActive ? 'text-primary' : 'text-on-surface-variant'}`}>{c.label}</span>
+                          {idx < columns.length - 1 ? <span className="mx-1 h-px w-4 bg-admin-border" /> : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-auto space-y-3">
                 <div className="grid grid-cols-2 gap-2">
@@ -633,6 +981,15 @@ export function OrderBoardPage() {
                     <Download className="h-4 w-4" />Print all
                   </button>
                 </div>
+                {selectedOrderRaw.status === 'cancelled' || selectedOrderRaw.status === 'handed_over' ? (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTarget({ id: selectedOrderRaw.id, orderNumber: selectedOrderRaw.orderNumber, prepaid: selectedPrepaid })}
+                    className="focus-ring flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-error/30 bg-[#fff0f0] px-3 text-sm font-semibold text-error hover:bg-error/10"
+                  >
+                    <Trash2 className="h-4 w-4" /> Delete order permanently
+                  </button>
+                ) : null}
                 <button type="button" onClick={() => setSelectedId(null)} className="focus-ring flex min-h-12 w-full items-center justify-center rounded-full bg-primary-container text-sm font-semibold text-white pink-glow hover:bg-primary-dark">
                   Done
                 </button>

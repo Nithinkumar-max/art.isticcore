@@ -37,7 +37,23 @@ export async function proxy(request: NextRequest) {
 
     const {
       data: { user },
+      error: getUserError,
     } = await supabase.auth.getUser()
+
+    // A stale/invalid refresh token means the persisted session no longer
+    // exists on Supabase (wiped cookies, project reset, signed out elsewhere).
+    // Clear the auth cookies so the user falls back to a clean signed-out
+    // state instead of erroring on every request.
+    if (getUserError && /refresh_token/i.test(getUserError.message)) {
+      const authCookieNames = request.cookies
+        .getAll()
+        .map((c) => c.name)
+        .filter((name) => name.startsWith('sb-'))
+      for (const name of authCookieNames) {
+        supabaseResponse.cookies.set(name, '', { path: '/', maxAge: 0 })
+      }
+      return supabaseResponse
+    }
 
     const pathname = request.nextUrl.pathname
     const isAdminAuthPage = pathname === '/admin/login'

@@ -1,17 +1,22 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { isAdmin } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/server'
 
 /**
  * GET /api/admin/orders — full order list for the admin board.
+ * Optional ?status= filter (e.g. ?status=cancelled) for the cancelled view.
  * Role verified against public.users via isAdmin().
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const admin = await isAdmin()
     if (!admin) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+
+    const status = request.nextUrl.searchParams.get('status')
+    const filters: Record<string, string> = {}
+    if (status) filters.status = status
 
     const supabase = createAdminClient()
     const { data, error } = await supabase
@@ -28,6 +33,7 @@ export async function GET() {
         user:users(id,name,email,phone)
       `,
       )
+      .match(filters)
       .order('created_at', { ascending: false })
       .limit(200)
 

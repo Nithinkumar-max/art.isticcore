@@ -16,9 +16,12 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const supabase = await createClient()
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser()
 
-  if (!user) return null
+  // Stale refresh token → the persisted session no longer exists. Treat as
+  // signed-out rather than throwing, so routes/components degrade gracefully.
+  if (error || !user) return null
 
   const { data: profile } = await supabase
     .from('users')

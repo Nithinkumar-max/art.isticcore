@@ -3,10 +3,11 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bell, ChevronRight, CircleHelp, LayoutDashboard, LogOut, Menu, Package, PencilRuler, Settings, ShoppingBag, UserRound, Users, X } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { Bell, ChevronRight, CircleHelp, LayoutDashboard, LogOut, Menu, Package, PencilRuler, RotateCcw, Settings, ShoppingBag, UserRound, Users, X } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { SESSION_COOKIE_NAME } from '@/lib/session-ttl'
+import { formatDistanceToNow } from 'date-fns'
 
 function useNavBadges() {
   const [badges, setBadges] = useState<{ orders: number; customRequests: number }>({ orders: 0, customRequests: 0 })
@@ -17,6 +18,178 @@ function useNavBadges() {
       .catch(() => {})
   }, [])
   return badges
+}
+
+type NotificationItem = {
+  id: string
+  order_number?: string
+  status?: string
+  payment_status?: string
+  total?: number | string
+  payment_method?: string
+  created_at: string
+  name?: string
+  contact?: string
+  email?: string
+  user?: { id: string; name: string; email: string } | null
+}
+
+type NotificationsPayload = {
+  total: number
+  counts: { activeOrders: number; refundsPending: number; customRequests: number }
+  activeOrders: NotificationItem[]
+  refundsPending: NotificationItem[]
+  customRequests: NotificationItem[]
+}
+
+const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })
+
+function NotificationsBell() {
+  const [open, setOpen] = useState(false)
+  const [data, setData] = useState<NotificationsPayload | null>(null)
+  const [failed, setFailed] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [open])
+
+  const load = useCallback(() => {
+    fetch('/api/admin/notifications')
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then(d => {
+        setData(d as NotificationsPayload)
+        setFailed(false)
+      })
+      .catch((err: unknown) => {
+        console.warn('Notifications failed to load:', err)
+        setFailed(true)
+      })
+  }, [])
+
+  useEffect(() => {
+    load()
+    const id = window.setInterval(load, 60000)
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(id)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [load])
+
+  const total = data?.total ?? 0
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="focus-ring relative rounded-full p-2 text-on-surface-variant hover:bg-surface-container-low hover:text-primary"
+        aria-label={`Notifications${total > 0 ? `, ${total} need attention` : ''}`}
+        aria-expanded={open}
+      >
+        <Bell className="h-5 w-5" />
+        <AnimatePresence>
+          {total > 0 ? (
+            <motion.span
+              key="dot"
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0 }}
+              className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-container px-1 text-[9px] font-bold text-on-primary-container"
+            >
+              {total > 9 ? '9+' : total}
+            </motion.span>
+          ) : null}
+        </AnimatePresence>
+      </button>
+
+      <AnimatePresence>
+        {open ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={{ duration: 0.16 }}
+            className="absolute right-0 z-40 mt-2 w-[min(92vw,24rem)] overflow-hidden rounded-2xl border border-admin-border bg-surface shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-admin-border px-4 py-3">
+              <p className="text-sm font-semibold">Notifications</p>
+              {total > 0 ? <span className="rounded-full bg-primary-container/20 px-2 py-0.5 text-[11px] font-semibold text-primary">{total} to check</span> : null}
+            </div>
+            <div className="max-h-[26rem] overflow-y-auto">
+              {failed ? (
+                <div className="px-4 py-10 text-center text-sm text-on-surface-variant">
+                  <Bell className="mx-auto mb-2 h-5 w-5 text-error/60" />
+                  <p>Couldn&apos;t load notifications.</p>
+                  <button
+                    type="button"
+                    onClick={load}
+                    className="focus-ring mt-3 rounded-full border border-admin-border px-3 py-1.5 text-xs font-semibold text-primary hover:border-primary"
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : total === 0 ? (
+                <div className="px-4 py-10 text-center text-sm text-on-surface-variant">
+                  <Bell className="mx-auto mb-2 h-5 w-5 text-primary/50" />
+                  You&apos;re all caught up.
+                </div>
+              ) : (
+                <>
+                  <NotificationGroup label="Orders to process" count={data?.counts.activeOrders ?? 0} href="/admin/orders" icon={ShoppingBag} items={data?.activeOrders ?? []} format={(i) => `#${i.order_number} · ${inr.format(Number(i.total))}${i.user?.name ? ` · ${i.user.name}` : ''}`} onNavigate={() => setOpen(false)} />
+                  <NotificationGroup label="Refunds to process" count={data?.counts.refundsPending ?? 0} href="/admin/orders" icon={RotateCcw} items={data?.refundsPending ?? []} format={(i) => `#${i.order_number} · ${inr.format(Number(i.total))} · Razorpay`} onNavigate={() => setOpen(false)} tone="warning" />
+                  <NotificationGroup label="New custom requests" count={data?.counts.customRequests ?? 0} href="/admin/custom-requests" icon={PencilRuler} items={data?.customRequests ?? []} format={(i) => `${i.name ?? 'New request'}${i.contact ? ` · ${i.contact}` : ''}`} onNavigate={() => setOpen(false)} />
+                </>
+              )}
+            </div>
+            <div className="border-t border-admin-border px-4 py-2 text-[11px] text-on-surface-variant">Refreshes every minute · actions are manual, no automation</div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function NotificationGroup({ label, count, href, icon: Icon, items, format, tone, onNavigate }: {
+  label: string
+  count: number
+  href: string
+  icon: typeof ShoppingBag
+  items: NotificationItem[]
+  format: (item: NotificationItem) => string
+  tone?: 'warning'
+  onNavigate: () => void
+}) {
+  if (count === 0) return null
+  return (
+    <div className="border-b border-admin-border last:border-0">
+      <div className="sticky top-0 flex items-center gap-2 border-b border-admin-border bg-surface px-4 py-2.5">
+        <Icon className={`h-4 w-4 ${tone === 'warning' ? 'text-secondary' : 'text-primary'}`} />
+        <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">{label}</p>
+        <span className="ml-auto rounded-full bg-surface-container-low px-2 py-0.5 text-[10px] font-bold text-on-surface-variant">{count}</span>
+      </div>
+      <ul>
+        {items.slice(0, 6).map((item) => (
+          <li key={item.id}>
+            <Link href={href} onClick={onNavigate} className="focus-ring flex items-start justify-between gap-3 px-4 py-3 hover:bg-background-warm/60">
+              <span className="line-clamp-1 text-sm">{format(item)}</span>
+              <span className="shrink-0 text-[11px] text-on-surface-variant">{formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
@@ -117,15 +290,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-3">
-            <label className="relative hidden lg:block">
-              <span className="sr-only">Search admin workspace</span>
-              <input placeholder="Search orders, products..." className="focus-ring w-64 rounded-full border border-transparent bg-surface-container-low px-4 py-2.5 text-sm placeholder:text-on-surface-variant/70 focus:border-primary-container" />
-            </label>
-            <button type="button" className="focus-ring relative rounded-full p-2 text-on-surface-variant hover:bg-surface-container-low hover:text-primary" aria-label="Notifications">
-              <Bell className="h-5 w-5" />
-              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary-container" />
-            </button>
+          <div className="flex items-center gap-1 sm:gap-2.5">
+            <NotificationsBell />
             <button type="button" className="focus-ring hidden rounded-full p-2 text-on-surface-variant hover:bg-surface-container-low hover:text-primary sm:block" aria-label="Help">
               <CircleHelp className="h-5 w-5" />
             </button>

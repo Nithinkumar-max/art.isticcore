@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { isAdmin } from '@/lib/auth'
-import { updateOrderStatus } from '@/lib/services/orders'
+import { deleteOrder, updateOrderStatus } from '@/lib/services/orders'
 
 const ORDER_STATUS_VALUES = [
   'confirmed', 'preparing', 'ready_for_dispatch', 'handed_over', 'cancelled', 'refunded',
@@ -80,5 +80,33 @@ export async function PATCH(
   } catch (error: unknown) {
     console.error('API /api/admin/orders/[id] PATCH error:', error)
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 })
+  }
+}
+
+/**
+ * DELETE /api/admin/orders/[id] — permanently delete an order.
+ * For genuinely unwanted/duplicate/test orders. Cancelled prepaid orders should
+ * be refunded first (see /refund); deletion is irreversible.
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const admin = await isAdmin()
+    if (!admin) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    const { id } = await params
+    const deleted = await deleteOrder(id)
+    if (!deleted) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (error: unknown) {
+    console.error('API /api/admin/orders/[id] DELETE error:', error)
+    return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 })
   }
 }

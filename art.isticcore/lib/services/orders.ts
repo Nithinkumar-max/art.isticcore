@@ -357,7 +357,18 @@ export async function updateOrderStatus({
     )
     .single()
 
-  if (error || !data) throw new Error((error as { message?: string })?.message || 'Failed to update order status')
+  if (error || !data) {
+    const message: string = (error as { message?: string })?.message || 'Failed to update order status'
+    // Live DB drifted: the audit trigger writes to status_history but the column
+    // is missing. Surface the fix instead of a generic failure.
+    if (message.includes('status_history')) {
+      throw new Error(
+        'Order status save blocked: the orders table is missing the `status_history` column. ' +
+          'Run supabase/migrations/20260906000002_ensure_orders_status_history.sql in the Supabase dashboard to fix it.',
+      )
+    }
+    throw new Error(message)
+  }
 
   const updatedOrder = data as unknown as OrderWithItems
 
@@ -381,4 +392,92 @@ export async function updateOrderStatus({
   }
 
   return updatedOrder
+}
+
+/**
+ * Hard-delete an order (admin only). payments.order_id has no ON DELETE CASCADE
+ * in older schemas, so the payment row is removed explicitly first; order_items
+ * cascade. Cancelled/refunded orders are normally kept for refund tracking —
+ * use this only for genuinely unwanted, duplicate, or test orders.
+ */
+export async function deleteOrder(orderId: string): Promise<boolean> {
+  const supabase = await createAdminClient()
+
+  const { data: existing } = await supabase
+    .from('orders')
+    .select('id, order_number, total, payment_method, payment_status, status, created_at')
+    .eq('id', orderId)
+    .maybeSingle()
+  if (!existing) return false
+
+  await supabase.from('payments').delete().eq('order_id', orderId)
+
+  const { error } = await supabase.from('orders').delete().eq('id', orderId)
+  if (error) throw new Error(error.message || 'Failed to delete order')
+
+  await supabase.from('audit_logs').insert({
+    action: 'order.deleted',
+    entity: 'orders',
+    entity_id: orderId,
+    metadata: {
+      order_number: existing.order_number,
+      total: Number(existing.total),
+      payment_method: existing.payment_method,
+      payment_status: existing.payment_status,
+      order_status: existing.status,
+      created_at: existing.created_at,
+    },
+  })
+
+  return true
+}
+
+/**
+ * Mark a cancelled order's payment as refunded (or revert it to paid) for refund
+ * tracking. No money moves here — refunds are processed in the Razorpay
+ * dashboard; this is bookkeeping so the cancelled ledger reflects reality.
+ */
+export async function markOrderPaymentRefunded(orderId: string, refunded: boolean): Promise<OrderWithItems> {
+  const supabase = await createAdminClient()
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('status')
+    .eq('id', orderId)
+    .maybeSingle()
+  if (!order) throw new Error('Order not found')
+
+  const paymentStatus: PaymentStatus = refunded ? 'refunded' : 'paid'
+
+  await supabase.from('payments').update({ status: paymentStatus }).eq('order_id', orderId)
+  await supabase.from('orders').update({ payment_status: paymentStatus }).eq('id', orderId)
+
+  await supabase.from('audit_logs').insert({
+    action: refunded ? 'order.refund_marked' : 'order.refund_reverted',
+    entity: 'orders',
+    entity_id: orderId,
+    metadata: { payment_status: paymentStatus },
+  })
+
+  const { data: updated, error } = await supabase
+    .from('orders')
+    .select(
+      `
+      *,
+      items:order_items(
+        *,
+        product:products(
+          id, name,
+          images:product_images(url, alt_text, display_order, is_primary)
+        )
+      ),
+      address:addresses(*),
+      payment:payments(*)
+    `,
+    )
+    .eq('id', orderId)
+    .maybeSingle()
+
+  if (error || !updated) throw new Error('Order not found')
+  return updated as unknown as OrderWithItems
 }
